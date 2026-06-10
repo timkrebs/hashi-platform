@@ -25,6 +25,11 @@ resource "boundary_credential_store_vault" "hcp_vault" {
   token     = vault_token.boundary_credential_store.client_token
 
   worker_filter = "\"vault\" in \"/tags/type\""
+
+  # The create-time Vault token lookup is routed through the egress worker;
+  # wait until that worker has booted and registered (see time_sleep in
+  # worker.tf) or the controller reports "No workers are available."
+  depends_on = [time_sleep.worker_ready]
 }
 
 # Per-session SSH certificate: Boundary generates an ed25519 keypair, Vault

@@ -51,3 +51,14 @@ resource "aws_instance" "egress_worker" {
     Name = "${local.name_prefix}-boundary-egress-worker"
   }
 }
+
+# The egress worker is not usable the instant its EC2 instance exists: it still
+# has to boot, install boundary-worker, and register with the control plane
+# using its activation token. The Vault credential store's create-time token
+# lookup is routed THROUGH this worker (worker_filter), so creating it too soon
+# fails with "No workers are available to handle this request." Give the worker
+# time to come online before anything depends on it.
+resource "time_sleep" "worker_ready" {
+  depends_on      = [aws_instance.egress_worker, boundary_worker.egress]
+  create_duration = "180s"
+}
