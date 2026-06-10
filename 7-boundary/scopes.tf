@@ -2,24 +2,14 @@ locals {
   name_prefix = "hashi-platform"
 
   # The worker config wants the cluster UUID, which only exists as the host
-  # prefix of cluster_url (https://<uuid>.boundary.hashicorp.cloud).
-  boundary_cluster_uuid = regex("^https://([0-9a-f-]+)\\.", hcp_boundary_cluster.main.cluster_url)[0]
+  # prefix of cluster_url (https://<uuid>.boundary.hashicorp.cloud). The cluster
+  # now lives in 7-boundary-cluster, so derive it from that layer's output.
+  boundary_cluster_uuid = data.tfe_outputs.boundary_cluster.nonsensitive_values.cluster_uuid
 
   # EC2 instances carrying this tag are discovered by the dynamic host
   # catalog and become Boundary hosts automatically.
   target_tag_key   = "boundary-target"
   target_tag_value = "ssh"
-}
-
-resource "hcp_boundary_cluster" "main" {
-  cluster_id = local.name_prefix
-  tier       = var.boundary_tier
-  username   = var.boundary_admin_username
-  password   = var.boundary_admin_password
-
-  maintenance_window_config {
-    upgrade_type = "AUTOMATIC"
-  }
 }
 
 # Scopes mirror intended team boundaries (org -> project), per the reference

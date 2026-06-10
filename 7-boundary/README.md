@@ -12,8 +12,10 @@ the operator's machine (Plus tier).
 
 What's here:
 
-- `hcp_boundary_cluster` (Plus) with initial password-auth admin — OIDC to an
-  IdP is the documented follow-up
+- Consumes the `hcp_boundary_cluster` (Plus) created in
+  [7-boundary-cluster](../7-boundary-cluster) via `tfe_outputs`; the `boundary`
+  provider targets that existing cluster (OIDC to an IdP is the documented
+  follow-up)
 - Scopes `hashi-platform` (org) → `platform` (project)
 - Egress worker: controller-led registration, tags `type = ["egress","vault"]`
 - **Dynamic AWS host catalog** discovering instances tagged `boundary-target=ssh`
@@ -29,12 +31,14 @@ What's here:
 
 Order matters the first time:
 
-1. `0-bootstrap` re-applied locally (agent pool, new workspace, execution modes)
+1. `0-bootstrap` re-applied locally (agent pool, new workspaces, execution modes)
 2. `1-tfc-agent` applied, agent shows **Idle** in org Settings → Agents
 3. `3-vault-config` applied (SSH CA + policies)
-4. In workspace `7-boundary`, set the **sensitive** Terraform variable
-   `boundary_admin_password` (≥ 8 chars) once in the UI
-5. PR → merge → confirm apply (cluster creation takes ~10 minutes)
+4. `7-boundary-cluster` applied (creates the HCP Boundary cluster, ~10 minutes).
+   Set its **sensitive** `boundary_admin_password` (≥ 8 chars) once in the UI
+5. In workspace `7-boundary`, set the **sensitive** Terraform variable
+   `boundary_admin_password` to the **same** value once in the UI
+6. PR → merge → confirm apply
 
 ## Definition of Done — the zero-keys login
 
