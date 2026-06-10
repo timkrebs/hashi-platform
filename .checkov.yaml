@@ -1,0 +1,21 @@
+# Central register of policy-scan exceptions — every skip carries a reason.
+# The pre-merge gate (.github/workflows/pr-gate.yml) hard-fails on anything
+# not listed here.
+quiet: true
+framework:
+  - terraform
+skip-check:
+  # TFC run role uses AdministratorAccess: deliberate bootstrap shortcut to
+  # unblock the build — scope down before production (0-bootstrap/aws-oidc.tf).
+  - CKV_AWS_274
+  # VPC flow logs are part of Layer 8 (cicd-observe) with the rest of
+  # observability; tracked there, not forgotten.
+  - CKV2_AWS_11
+  # Role SGs are intentionally created unattached in Layer 1; instances
+  # attach to them in Layers 4-7.
+  - CKV2_AWS_5
+  # Open egress is the design: outbound-only posture (NAT, HVN peering,
+  # Boundary worker dial-out). Ingress is strictly SG-referenced.
+  - CKV_AWS_382
+  # NAT gateway EIPs are association-by-allocation, not EC2-attached.
+  - CKV2_AWS_19
