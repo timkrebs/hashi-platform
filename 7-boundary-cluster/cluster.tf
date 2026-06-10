@@ -14,7 +14,7 @@ resource "hcp_boundary_cluster" "main" {
   username   = var.boundary_admin_username
   password   = var.boundary_admin_password
 
-  maintenance_window_config {
-    upgrade_type = "AUTOMATIC"
-  }
+  # No maintenance_window_config: that block is only valid for the SCHEDULED
+  # upgrade type (it implicitly carries a `day`). Omitting it keeps the cluster
+  # on the default AUTOMATIC upgrade cadence.
 }

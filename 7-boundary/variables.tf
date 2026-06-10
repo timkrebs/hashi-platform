@@ -16,17 +16,6 @@ variable "boundary_admin_username" {
   default     = "admin"
 }
 
-variable "boundary_tier" {
-  description = "HCP Boundary tier. Plus is required for SSH credential injection (the Vault-signed cert never reaches the client)"
-  type        = string
-  default     = "Plus"
-
-  validation {
-    condition     = contains(["Standard", "Plus"], var.boundary_tier)
-    error_message = "boundary_tier must be \"Standard\" or \"Plus\"."
-  }
-}
-
 variable "demo_target_instance_type" {
   description = "Instance type of the throwaway demo SSH target"
   type        = string

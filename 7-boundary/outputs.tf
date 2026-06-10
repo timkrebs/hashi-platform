@@ -1,6 +1,6 @@
 output "boundary_cluster_url" {
   description = "Boundary control-plane URL — use with `boundary authenticate password -addr <url>`"
-  value       = hcp_boundary_cluster.main.cluster_url
+  value       = data.tfe_outputs.boundary_cluster.nonsensitive_values.cluster_url
 }
 
 output "demo_target_private_ip" {
