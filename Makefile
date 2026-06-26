@@ -63,12 +63,20 @@ ascii: ## Fail if any source file contains non-ASCII characters (no emojis)
 	@matches=$$(LC_ALL=C grep -rn '[^[:print:][:space:]]' \
 		--include='*.md' --include='*.yml' --include='*.yaml' \
 		--include='*.tf' --include='*.sh' --include='*.hcl' \
-		--include='*.example' --include='Makefile' \
+		--include='*.sentinel' --include='*.example' --include='Makefile' \
 		--exclude-dir=.terraform . | grep -v '^\./LICENSE' || true); \
 	if [ -n "$$matches" ]; then \
 		echo "ERROR: non-ASCII characters found:"; echo "$$matches"; exit 1; \
 	else \
 		echo "OK: no non-ASCII characters"; \
+	fi
+
+.PHONY: sentinel
+sentinel: ## Format-check Sentinel policies if the CLI is installed
+	@if command -v sentinel >/dev/null 2>&1; then \
+		sentinel fmt -check policies/; \
+	else \
+		echo "sentinel CLI not installed; skipping"; \
 	fi
 
 .PHONY: clean
