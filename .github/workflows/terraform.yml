@@ -2,25 +2,54 @@ name: terraform
 
 on:
   push:
-    branches: [main]
+    branches: [dev, staging, main]
   pull_request:
-    branches: [main]
+    branches: [dev, staging, main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-# NOTE: TF_API_TOKEN and TF_CLOUD_ORGANIZATION are fetched from HCP Vault at run
-# time by the "Import secrets from Vault" step in each job. They are intentionally
-# NOT set here - a workflow-level env value overrides anything vault-action writes
-# to $GITHUB_ENV, which would silently shadow the Vault secrets.
+# Never run two pipelines for the same branch or PR at once; an in-flight
+# apply must finish before the next one starts.
+concurrency:
+  group: terraform-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: false
+
 env:
-  TF_WORKSPACE: hashi-platform-dev
   CONFIG_DIRECTORY: ./infra/aws-eks
+  TERRAFORM_VERSION: "1.9.8"
 
 jobs:
-  # 1. Static checks. Everything below is gated on this passing.
-  validate:
-    name: fmt & validate
+  # Map the branch under test to its HCP Terraform workspace and GitHub
+  # environment. Pull requests resolve against their base (target) branch.
+  resolve:
+    name: Resolve target environment
+    runs-on: ubuntu-latest
+    outputs:
+      workspace: ${{ steps.map.outputs.workspace }}
+      environment: ${{ steps.map.outputs.environment }}
+    steps:
+      - id: map
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            branch="${{ github.base_ref }}"
+          else
+            branch="${{ github.ref_name }}"
+          fi
+          case "$branch" in
+            dev)     ws=hashi-platform-dev;     env=dev ;;
+            staging) ws=hashi-platform-staging; env=staging ;;
+            main)    ws=hashi-platform-prod;    env=production ;;
+            *) echo "Unsupported branch: $branch" >&2; exit 1 ;;
+          esac
+          echo "workspace=$ws"    >> "$GITHUB_OUTPUT"
+          echo "environment=$env" >> "$GITHUB_OUTPUT"
+          echo "Resolved '$branch' -> workspace '$ws' (environment '$env')"
+
+  # Static analysis: formatting, validation, and linting.
+  static:
+    name: fmt, validate, tflint
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -30,7 +59,7 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.9.8"
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
 
       - name: Terraform fmt
         run: terraform fmt -check -recursive
@@ -41,10 +70,43 @@ jobs:
       - name: Terraform validate
         run: terraform validate
 
-  # 2. On pull requests: speculative plan only (no apply).
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.53.0
+
+      - name: TFLint
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tflint --init
+          tflint --format compact
+
+  # Security and compliance scanning.
+  security:
+    name: security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # gitleaks scans full history
+
+      - name: Trivy IaC misconfiguration scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: infra
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+      - name: Gitleaks secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # On pull requests: speculative plan against the target workspace (no apply).
   plan:
-    name: HCP Terraform plan (speculative)
-    needs: validate
+    name: HCP Terraform plan
+    needs: [resolve, static, security]
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -69,7 +131,7 @@ jobs:
         uses: hashicorp/tfc-workflows-github/actions/upload-configuration@v1.3.2
         id: upload
         with:
-          workspace: ${{ env.TF_WORKSPACE }}
+          workspace: ${{ needs.resolve.outputs.workspace }}
           directory: ${{ env.CONFIG_DIRECTORY }}
           speculative: true
 
@@ -77,7 +139,7 @@ jobs:
         uses: hashicorp/tfc-workflows-github/actions/create-run@v1.3.2
         id: run
         with:
-          workspace: ${{ env.TF_WORKSPACE }}
+          workspace: ${{ needs.resolve.outputs.workspace }}
           configuration_version: ${{ steps.upload.outputs.configuration_version_id }}
           plan_only: true
 
@@ -90,24 +152,24 @@ jobs:
       - name: Write plan summary
         run: |
           {
-            echo "### HCP Terraform plan"
+            echo "### HCP Terraform plan - ${{ needs.resolve.outputs.workspace }}"
             echo "Run: ${{ steps.run.outputs.run_link }}"
             echo ""
             echo "Add: ${{ steps.plan-output.outputs.add }}, Change: ${{ steps.plan-output.outputs.change }}, Destroy: ${{ steps.plan-output.outputs.destroy }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # 3. On merge to main: upload config, plan, and apply.
+  # On push/dispatch to dev, staging, or main: apply to the mapped workspace.
   apply:
     name: HCP Terraform apply
-    needs: validate
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [resolve, static, security]
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write        # required for Vault OIDC; scoped to this job
-    # Optional manual gate: configure required reviewers on this environment
-    # in repo Settings > Environments to require approval before apply.
-    environment: production
+    # Dynamic per-branch environment. Configure required reviewers on the
+    # "production" environment (repo Settings > Environments) to gate prod.
+    environment: ${{ needs.resolve.outputs.environment }}
     steps:
       - uses: actions/checkout@v4
 
@@ -127,14 +189,14 @@ jobs:
         uses: hashicorp/tfc-workflows-github/actions/upload-configuration@v1.3.2
         id: upload
         with:
-          workspace: ${{ env.TF_WORKSPACE }}
+          workspace: ${{ needs.resolve.outputs.workspace }}
           directory: ${{ env.CONFIG_DIRECTORY }}
 
       - name: Create run
         uses: hashicorp/tfc-workflows-github/actions/create-run@v1.3.2
         id: run
         with:
-          workspace: ${{ env.TF_WORKSPACE }}
+          workspace: ${{ needs.resolve.outputs.workspace }}
           configuration_version: ${{ steps.upload.outputs.configuration_version_id }}
 
       - name: Apply run

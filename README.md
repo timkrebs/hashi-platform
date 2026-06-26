@@ -52,20 +52,49 @@ enforces, so failures surface locally first:
 
 ```bash
 make check     # fmt-check, validate, workflow YAML, and ASCII-only guard
+make ci        # check + tflint + security scans (best effort locally)
 make fmt       # auto-format Terraform files
 make help      # list all targets
 ```
 
+## Environments
+
+The repo follows a three-stage promotion model. Each long-lived branch maps to
+its own HCP Terraform workspace and GitHub Environment:
+
+| Branch | Workspace | Environment | Gate |
+| --- | --- | --- | --- |
+| `dev` | `hashi-platform-dev` | `dev` | auto-apply |
+| `staging` | `hashi-platform-staging` | `staging` | auto-apply |
+| `main` | `hashi-platform-prod` | `production` | manual approval |
+
+Changes flow `dev -> staging -> main`. A pull request runs a speculative plan
+against the **base** branch's workspace; a merge applies to that workspace.
+
 ## CI/CD
 
 Runs are driven by GitHub Actions ([`.github/workflows/terraform.yml`](.github/workflows/terraform.yml))
-against an **API-driven** HCP Terraform workspace:
+against **API-driven** HCP Terraform workspaces. Every push and pull request
+runs these gates before any plan or apply:
 
-1. `fmt -check` + `validate` run on every push and pull request.
-2. On a **pull request**, a speculative HCP Terraform **plan** runs (no apply).
-3. On **merge to `main`**, the config is uploaded and HCP Terraform **applies**
-   it. Credentials are injected at run time via Vault dynamic credentials, so no
-   long-lived AWS keys live in CI.
+| Gate | Tool | Purpose |
+| --- | --- | --- |
+| Format | `terraform fmt -check` | Consistent style |
+| Validate | `terraform validate` | Syntactic and provider correctness |
+| Lint | TFLint (+ AWS ruleset) | Provider best practices, deprecations |
+| Misconfiguration | Trivy (`config`) | IaC security findings (HIGH/CRITICAL fail) |
+| Secrets | Gitleaks | No committed credentials |
+
+Only if all gates pass does the pipeline proceed:
+
+1. On a **pull request**, a speculative HCP Terraform **plan** runs (no apply).
+2. On **push to `dev`/`staging`/`main`**, the config is uploaded and HCP
+   Terraform **applies** to the mapped workspace. `production` requires manual
+   approval via its GitHub Environment.
+
+A `concurrency` group per branch/PR prevents overlapping applies. Credentials
+are never static: AWS access is issued at run time via HCP Terraform's Vault
+dynamic credentials.
 
 The pipeline holds **no static secrets**. The `plan` and `apply` jobs
 authenticate to HCP Vault over **GitHub OIDC** (`hashicorp/vault-action`, JWT
@@ -78,18 +107,28 @@ mount `jwt-github`, role `gha-tfc`) and pull `TF_API_TOKEN` and
 | --- | --- | --- |
 | HCP Vault KV (`secret/data/ci/tfc`) | `TF_API_TOKEN` | HCP Terraform team/user API token |
 | HCP Vault KV (`secret/data/ci/tfc`) | `TF_CLOUD_ORGANIZATION` | `tim-krebs-org` |
-| Workflow `env` | `TF_WORKSPACE` | `hashi-platform-dev` |
 
 On the **Vault** side, the `jwt-github` JWT auth mount must trust GitHub's OIDC
 issuer with a `gha-tfc` role bound to this repo, and a policy granting read on
 `secret/data/ci/tfc`. The CI jobs request `id-token: write` for this exchange.
 
-On the **HCP Terraform** side, create the workspace with the **API-driven**
+On the **HCP Terraform** side, create each workspace with the **API-driven**
 workflow (Remote execution), and configure Vault dynamic credentials
 (`TFC_VAULT_PROVIDER_AUTH=true`, `TFC_VAULT_ADDR`, `TFC_VAULT_NAMESPACE`,
-`TFC_VAULT_RUN_ROLE=tfc-role`) plus the JWT auth role in Vault. The `apply` job
-is also bound to a `production` GitHub Environment, so you can require a manual
-reviewer before any apply.
+`TFC_VAULT_RUN_ROLE=tfc-role`) plus the JWT auth role in Vault.
+
+### Recommended branch protection
+
+For an enterprise-grade setup, protect `staging` and `main` so the gates cannot
+be bypassed:
+
+- Require pull requests (no direct pushes) and at least one review.
+- Require the `static`, `security`, and `plan` status checks to pass.
+- Require branches to be up to date before merging.
+- Add required reviewers to the `production` GitHub Environment.
+- Enforce **Sentinel or OPA policy sets** at the HCP Terraform org/project
+  level for cross-cutting guardrails (tagging, allowed regions, instance sizing)
+  that run inside every plan.
 
 ## Roadmap
 
