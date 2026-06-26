@@ -30,12 +30,29 @@ validate: ## Initialize (no backend) and validate the Terraform config
 	cd $(TF_DIR) && terraform init -backend=false -input=false >/dev/null && terraform validate
 
 .PHONY: lint
-lint: ## Run tflint if installed (skipped otherwise)
+lint: ## Run tflint (auto-installs plugins) if installed
 	@if command -v tflint >/dev/null 2>&1; then \
-		cd $(TF_DIR) && tflint; \
+		cd $(TF_DIR) && tflint --init && tflint --format compact; \
 	else \
 		echo "tflint not installed; skipping"; \
 	fi
+
+.PHONY: security
+security: ## Run Trivy IaC scan and Gitleaks secret scan if installed
+	@if command -v trivy >/dev/null 2>&1; then \
+		trivy config --severity HIGH,CRITICAL --exit-code 1 infra; \
+	else \
+		echo "trivy not installed; skipping"; \
+	fi
+	@if command -v gitleaks >/dev/null 2>&1; then \
+		gitleaks detect --no-banner --redact; \
+	else \
+		echo "gitleaks not installed; skipping"; \
+	fi
+
+.PHONY: ci
+ci: check lint security ## Run the full check suite (mirrors CI, best effort locally)
+	@echo "OK: full CI suite complete."
 
 .PHONY: yaml
 yaml: ## Validate GitHub Actions workflow YAML
