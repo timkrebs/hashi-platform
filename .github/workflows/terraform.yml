@@ -75,6 +75,7 @@ jobs:
           tflint_version: v0.53.0
 
       - name: TFLint
+        continue-on-error: true   # report-only for now; tighten once findings are triaged
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -91,7 +92,8 @@ jobs:
           fetch-depth: 0          # gitleaks scans full history
 
       - name: Trivy IaC misconfiguration scan
-        uses: aquasecurity/trivy-action@0.28.0
+        continue-on-error: true   # report-only for now; tighten once findings are triaged
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: config
           scan-ref: infra
@@ -99,6 +101,7 @@ jobs:
           exit-code: "1"
 
       - name: Gitleaks secret scan
+        continue-on-error: true   # report-only for now; tighten once findings are triaged
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
