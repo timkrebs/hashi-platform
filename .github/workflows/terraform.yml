@@ -1,0 +1,145 @@
+name: terraform
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# NOTE: TF_API_TOKEN and TF_CLOUD_ORGANIZATION are fetched from HCP Vault at run
+# time by the "Import secrets from Vault" step in each job. They are intentionally
+# NOT set here - a workflow-level env value overrides anything vault-action writes
+# to $GITHUB_ENV, which would silently shadow the Vault secrets.
+env:
+  TF_WORKSPACE: hashi-platform-dev
+  CONFIG_DIRECTORY: ./infra/aws-eks
+
+jobs:
+  # 1. Static checks. Everything below is gated on this passing.
+  validate:
+    name: fmt & validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/aws-eks
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init (no backend)
+        run: terraform init -backend=false
+
+      - name: Terraform validate
+        run: terraform validate
+
+  # 2. On pull requests: speculative plan only (no apply).
+  plan:
+    name: HCP Terraform plan (speculative)
+    needs: validate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write        # required for Vault OIDC; scoped to this job
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import secrets from Vault
+        uses: hashicorp/vault-action@v3
+        with:
+          url: https://hashi-vault-euc1-public-vault-24f28885.731bdaf0.z1.hashicorp.cloud:8200
+          namespace: admin/hcp-platform
+          method: jwt
+          path: jwt-github               # the custom mount, NOT default "jwt"
+          role: gha-tfc
+          secrets: |
+            secret/data/ci/tfc TF_API_TOKEN | TF_API_TOKEN ;
+            secret/data/ci/tfc TF_CLOUD_ORGANIZATION | TF_CLOUD_ORGANIZATION
+
+      - name: Upload configuration
+        uses: hashicorp/tfc-workflows-github/actions/upload-configuration@v1.3.2
+        id: upload
+        with:
+          workspace: ${{ env.TF_WORKSPACE }}
+          directory: ${{ env.CONFIG_DIRECTORY }}
+          speculative: true
+
+      - name: Create plan-only run
+        uses: hashicorp/tfc-workflows-github/actions/create-run@v1.3.2
+        id: run
+        with:
+          workspace: ${{ env.TF_WORKSPACE }}
+          configuration_version: ${{ steps.upload.outputs.configuration_version_id }}
+          plan_only: true
+
+      - name: Get plan output
+        uses: hashicorp/tfc-workflows-github/actions/plan-output@v1.3.2
+        id: plan-output
+        with:
+          plan: ${{ steps.run.outputs.plan_id }}
+
+      - name: Write plan summary
+        run: |
+          {
+            echo "### HCP Terraform plan"
+            echo "Run: ${{ steps.run.outputs.run_link }}"
+            echo ""
+            echo "Add: ${{ steps.plan-output.outputs.add }}, Change: ${{ steps.plan-output.outputs.change }}, Destroy: ${{ steps.plan-output.outputs.destroy }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # 3. On merge to main: upload config, plan, and apply.
+  apply:
+    name: HCP Terraform apply
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write        # required for Vault OIDC; scoped to this job
+    # Optional manual gate: configure required reviewers on this environment
+    # in repo Settings > Environments to require approval before apply.
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import secrets from Vault
+        uses: hashicorp/vault-action@v3
+        with:
+          url: https://hashi-vault-euc1-public-vault-24f28885.731bdaf0.z1.hashicorp.cloud:8200
+          namespace: admin/hcp-platform
+          method: jwt
+          path: jwt-github               # the custom mount, NOT default "jwt"
+          role: gha-tfc
+          secrets: |
+            secret/data/ci/tfc TF_API_TOKEN | TF_API_TOKEN ;
+            secret/data/ci/tfc TF_CLOUD_ORGANIZATION | TF_CLOUD_ORGANIZATION
+
+      - name: Upload configuration
+        uses: hashicorp/tfc-workflows-github/actions/upload-configuration@v1.3.2
+        id: upload
+        with:
+          workspace: ${{ env.TF_WORKSPACE }}
+          directory: ${{ env.CONFIG_DIRECTORY }}
+
+      - name: Create run
+        uses: hashicorp/tfc-workflows-github/actions/create-run@v1.3.2
+        id: run
+        with:
+          workspace: ${{ env.TF_WORKSPACE }}
+          configuration_version: ${{ steps.upload.outputs.configuration_version_id }}
+
+      - name: Apply run
+        uses: hashicorp/tfc-workflows-github/actions/apply-run@v1.3.2
+        if: ${{ fromJSON(steps.run.outputs.payload).data.attributes.actions.IsConfirmable }}
+        with:
+          run: ${{ steps.run.outputs.run_id }}
+          comment: "Applied from GitHub Actions: ${{ github.sha }}"
