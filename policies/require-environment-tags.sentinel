@@ -1,0 +1,30 @@
+# Require a standard set of tags on every taggable resource. Advisory so it
+# reports drift without blocking; promote to soft-mandatory once clean.
+#
+# Note: the provider applies these via default_tags, which surface in the
+# computed `tags_all` attribute rather than `tags`, so this policy inspects
+# `tags_all`.
+
+import "tfplan/v2" as tfplan
+
+required_tags = ["Project", "Environment", "ManagedBy"]
+
+# Resources being created or updated that support tags.
+taggable = filter tfplan.resource_changes as _, rc {
+	(rc.change.actions contains "create" or rc.change.actions contains "update") and
+		(rc.change.after.tags_all else null) is not null
+}
+
+missing = filter taggable as _, rc {
+	any required_tags as t {
+		not (t in rc.change.after.tags_all)
+	}
+}
+
+for missing as address, rc {
+	print(address, "is missing one or more required tags:", required_tags)
+}
+
+main = rule {
+	length(missing) is 0
+}

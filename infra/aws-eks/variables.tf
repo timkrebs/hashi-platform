@@ -12,6 +12,12 @@ variable "cluster_version" {
   }
 }
 
+variable "node_instance_types" {
+  description = "EC2 instance types for the EKS managed node groups. Set per workspace; Sentinel restricts the allowed values per environment."
+  type        = list(string)
+  default     = ["t3.small"]
+}
+
 variable "region" {
   description = "AWS region"
   type        = string
