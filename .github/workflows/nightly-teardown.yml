@@ -1,0 +1,62 @@
+name: nightly-teardown
+
+# Cost backstop: destroy any dev/staging infrastructure left running.
+# Manual by default. Uncomment the schedule to enable nightly teardown once
+# you are comfortable that dev/staging are safe to nuke unattended.
+
+on:
+  workflow_dispatch: {}
+  # schedule:
+  #   - cron: "0 2 * * *"   # 02:00 UTC every day
+
+permissions:
+  contents: read
+
+jobs:
+  teardown:
+    name: Destroy ${{ matrix.environment }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [dev, staging]   # prod is intentionally excluded
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import secrets from Vault
+        uses: hashicorp/vault-action@v3
+        with:
+          url: https://hashi-vault-euc1-public-vault-24f28885.731bdaf0.z1.hashicorp.cloud:8200
+          namespace: admin/hcp-platform
+          method: jwt
+          path: jwt-github
+          role: gha-tfc
+          secrets: |
+            secret/data/ci/tfc TF_API_TOKEN | TF_API_TOKEN ;
+            secret/data/ci/tfc TF_CLOUD_ORGANIZATION | TF_CLOUD_ORGANIZATION
+
+      - name: Upload configuration
+        uses: hashicorp/tfc-workflows-github/actions/upload-configuration@v1.3.2
+        id: upload
+        with:
+          workspace: hashi-platform-${{ matrix.environment }}
+          directory: ./infra/aws-eks
+
+      - name: Create destroy run
+        uses: hashicorp/tfc-workflows-github/actions/create-run@v1.3.2
+        id: run
+        with:
+          workspace: hashi-platform-${{ matrix.environment }}
+          configuration_version: ${{ steps.upload.outputs.configuration_version_id }}
+          is_destroy: true
+          message: "Nightly cost-saving teardown"
+
+      - name: Apply destroy run
+        uses: hashicorp/tfc-workflows-github/actions/apply-run@v1.3.2
+        if: ${{ fromJSON(steps.run.outputs.payload).data.attributes.actions.IsConfirmable }}
+        with:
+          run: ${{ steps.run.outputs.run_id }}
+          comment: "Nightly teardown via GitHub Actions"

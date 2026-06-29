@@ -130,6 +130,43 @@ be bypassed:
   level for cross-cutting guardrails (tagging, allowed regions, instance sizing)
   that run inside every plan.
 
+## Ephemeral environments (dev / staging)
+
+The `dev` and `staging` environments are ephemeral: stand them up for a load
+test, then tear them down so they cost nothing while idle. Prod is excluded
+from all teardown automation. Three layers cooperate:
+
+1. **On-demand lifecycle** -
+   [`ephemeral-env.yml`](.github/workflows/ephemeral-env.yml) (`workflow_dispatch`):
+   - `up` - deploy and leave running for manual testing.
+   - `down` - destroy when you are done.
+   - `cycle` - deploy, run the [k6 load test](loadtest/k6-script.js), then
+     **always destroy** (even if the test fails), so nothing is left running.
+
+   ```bash
+   gh workflow run ephemeral-env.yml \
+     -f environment=dev -f action=cycle -f target_url=https://<app-endpoint>
+   ```
+
+2. **Scheduled backstop** -
+   [`nightly-teardown.yml`](.github/workflows/nightly-teardown.yml) destroys
+   any dev/staging infra left running. Manual by default; uncomment the `cron`
+   to enable nightly teardown.
+
+3. **Native HCP Terraform auto-destroy** (recommended TTL backstop). Set an
+   inactivity-based auto-destroy on each ephemeral workspace so it self-destructs
+   even if CI never runs:
+
+   ```bash
+   curl -sS --header "Authorization: Bearer $TF_API_TOKEN" \
+     --header "Content-Type: application/vnd.api+json" --request PATCH \
+     "https://app.terraform.io/api/v2/organizations/$TF_CLOUD_ORGANIZATION/workspaces/hashi-platform-dev" \
+     --data '{"data":{"type":"workspaces","attributes":{"auto-destroy-activity-duration":"2d"}}}'
+   ```
+
+All teardown reuses the same Vault OIDC -> HCP Terraform path as the main
+pipeline, and a destroy run is just a normal run with `is_destroy=true`.
+
 ## Roadmap
 
 - [x] Provision EKS cluster with Terraform
