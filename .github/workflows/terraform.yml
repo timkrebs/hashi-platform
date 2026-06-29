@@ -130,6 +130,31 @@ jobs:
             secret/data/ci/tfc TF_API_TOKEN | TF_API_TOKEN ;
             secret/data/ci/tfc TF_CLOUD_ORGANIZATION | TF_CLOUD_ORGANIZATION
 
+      - name: Verify HCP Terraform org and workspace
+        run: |
+          : "${TF_API_TOKEN:?empty - Vault did not return a token}"
+          : "${TF_CLOUD_ORGANIZATION:?empty - Vault did not return an organization}"
+          ws="${{ needs.resolve.outputs.workspace }}"
+          api="https://app.terraform.io/api/v2"
+          echo "Org=${TF_CLOUD_ORGANIZATION}  Workspace=${ws}"
+          org_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${TF_API_TOKEN}" -H "Content-Type: application/vnd.api+json" \
+            "${api}/organizations/${TF_CLOUD_ORGANIZATION}")
+          case "$org_code" in
+            200) : ;;
+            401) echo "::error::TF_API_TOKEN from Vault is unauthorized (401). Check secret/data/ci/tfc."; exit 1 ;;
+            404) echo "::error::Organization '${TF_CLOUD_ORGANIZATION}' not found (404). TF_CLOUD_ORGANIZATION from Vault is wrong."; exit 1 ;;
+            *)   echo "::error::Unexpected HTTP ${org_code} querying the organization."; exit 1 ;;
+          esac
+          ws_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${TF_API_TOKEN}" -H "Content-Type: application/vnd.api+json" \
+            "${api}/organizations/${TF_CLOUD_ORGANIZATION}/workspaces/${ws}")
+          case "$ws_code" in
+            200) echo "OK: workspace '${ws}' exists and is visible to the token." ;;
+            404) echo "::error::Workspace '${ws}' not found in org '${TF_CLOUD_ORGANIZATION}' (404). Create it (API-driven, Remote) or grant the token access."; exit 1 ;;
+            *)   echo "::error::Unexpected HTTP ${ws_code} querying the workspace."; exit 1 ;;
+          esac
+
       - name: Upload configuration
         uses: hashicorp/tfc-workflows-github/actions/upload-configuration@v1.3.2
         id: upload
@@ -187,6 +212,31 @@ jobs:
           secrets: |
             secret/data/ci/tfc TF_API_TOKEN | TF_API_TOKEN ;
             secret/data/ci/tfc TF_CLOUD_ORGANIZATION | TF_CLOUD_ORGANIZATION
+
+      - name: Verify HCP Terraform org and workspace
+        run: |
+          : "${TF_API_TOKEN:?empty - Vault did not return a token}"
+          : "${TF_CLOUD_ORGANIZATION:?empty - Vault did not return an organization}"
+          ws="${{ needs.resolve.outputs.workspace }}"
+          api="https://app.terraform.io/api/v2"
+          echo "Org=${TF_CLOUD_ORGANIZATION}  Workspace=${ws}"
+          org_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${TF_API_TOKEN}" -H "Content-Type: application/vnd.api+json" \
+            "${api}/organizations/${TF_CLOUD_ORGANIZATION}")
+          case "$org_code" in
+            200) : ;;
+            401) echo "::error::TF_API_TOKEN from Vault is unauthorized (401). Check secret/data/ci/tfc."; exit 1 ;;
+            404) echo "::error::Organization '${TF_CLOUD_ORGANIZATION}' not found (404). TF_CLOUD_ORGANIZATION from Vault is wrong."; exit 1 ;;
+            *)   echo "::error::Unexpected HTTP ${org_code} querying the organization."; exit 1 ;;
+          esac
+          ws_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${TF_API_TOKEN}" -H "Content-Type: application/vnd.api+json" \
+            "${api}/organizations/${TF_CLOUD_ORGANIZATION}/workspaces/${ws}")
+          case "$ws_code" in
+            200) echo "OK: workspace '${ws}' exists and is visible to the token." ;;
+            404) echo "::error::Workspace '${ws}' not found in org '${TF_CLOUD_ORGANIZATION}' (404). Create it (API-driven, Remote) or grant the token access."; exit 1 ;;
+            *)   echo "::error::Unexpected HTTP ${ws_code} querying the workspace."; exit 1 ;;
+          esac
 
       - name: Upload configuration
         uses: hashicorp/tfc-workflows-github/actions/upload-configuration@v1.3.2

@@ -1,0 +1,55 @@
+# Restrict EKS managed node-group instance types per environment.
+#
+# Keeps non-production environments small and cheap, and standardises
+# production on approved instance families. The environment is derived from
+# the workspace name (hashi-platform-<env>).
+
+import "tfplan/v2" as tfplan
+import "tfrun"
+import "strings"
+
+# Allowed EC2 instance types for EKS node groups, by environment.
+allowed_instance_types = {
+	"dev":     ["t3.micro", "t3.small", "t3.medium"],
+	"staging": ["t3.medium", "t3.large", "t3.xlarge", "m5.large", "m5.xlarge"],
+	"prod":    ["m5.large", "m5.xlarge", "m5.2xlarge", "m5.4xlarge", "c5.large", "c5.xlarge", "c5.2xlarge", "r5.large", "r5.xlarge"],
+}
+
+environment = func() {
+	ws = tfrun.workspace.name
+	if strings.has_suffix(ws, "-dev") { return "dev" }
+	if strings.has_suffix(ws, "-staging") { return "staging" }
+	if strings.has_suffix(ws, "-prod") { return "prod" }
+	return "unknown"
+}
+
+env = environment()
+allowed = allowed_instance_types[env] else []
+
+# Node groups being created or updated in this plan.
+node_groups = filter tfplan.resource_changes as _, rc {
+	rc.type is "aws_eks_node_group" and
+		rc.mode is "managed" and
+		(rc.change.actions contains "create" or rc.change.actions contains "update")
+}
+
+# Node groups using at least one disallowed instance type.
+violating = filter node_groups as _, rc {
+	any (rc.change.after.instance_types else []) as t {
+		not (t in allowed)
+	}
+}
+
+for violating as address, rc {
+	print(address, "uses disallowed instance type(s)", rc.change.after.instance_types,
+		"in environment", env, "- allowed:", allowed)
+}
+
+# Fail closed if the environment cannot be identified from the workspace name.
+env_is_known = rule {
+	env is not "unknown"
+}
+
+main = rule {
+	env_is_known and length(violating) is 0
+}

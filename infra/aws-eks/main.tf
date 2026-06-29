@@ -19,7 +19,7 @@ module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "5.8.1"
 
-  name = data.vault_kv_secret_v2.eks.data["vpc_name"]
+  name = nonsensitive(data.vault_kv_secret_v2.eks.data["vpc_name"])
 
   cidr = "10.0.0.0/16"
   azs  = slice(data.aws_availability_zones.available.names, 0, 3)
@@ -67,7 +67,7 @@ module "eks" {
     one = {
       name = "node-group-1"
 
-      instance_types = ["t3.small"]
+      instance_types = var.node_instance_types
 
       min_size     = 1
       max_size     = 3
@@ -77,7 +77,7 @@ module "eks" {
     two = {
       name = "node-group-2"
 
-      instance_types = ["t3.small"]
+      instance_types = var.node_instance_types
 
       min_size     = 1
       max_size     = 2

@@ -1,0 +1,47 @@
+# Cap the maximum size of EKS managed node groups per environment to limit
+# cost and blast radius. The environment is derived from the workspace name.
+
+import "tfplan/v2" as tfplan
+import "tfrun"
+import "strings"
+
+# Maximum allowed max_size per node group, by environment.
+max_node_count = {
+	"dev":     3,
+	"staging": 6,
+	"prod":    20,
+}
+
+environment = func() {
+	ws = tfrun.workspace.name
+	if strings.has_suffix(ws, "-dev") { return "dev" }
+	if strings.has_suffix(ws, "-staging") { return "staging" }
+	if strings.has_suffix(ws, "-prod") { return "prod" }
+	return "unknown"
+}
+
+env = environment()
+limit = max_node_count[env] else 0
+
+node_groups = filter tfplan.resource_changes as _, rc {
+	rc.type is "aws_eks_node_group" and
+		rc.mode is "managed" and
+		(rc.change.actions contains "create" or rc.change.actions contains "update")
+}
+
+violating = filter node_groups as _, rc {
+	(rc.change.after.scaling_config[0].max_size else 0) > limit
+}
+
+for violating as address, rc {
+	print(address, "requests max_size", rc.change.after.scaling_config[0].max_size,
+		"which exceeds the limit of", limit, "for environment", env)
+}
+
+env_is_known = rule {
+	env is not "unknown"
+}
+
+main = rule {
+	env_is_known and length(violating) is 0
+}

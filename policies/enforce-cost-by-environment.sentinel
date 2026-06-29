@@ -1,0 +1,33 @@
+# Enforce a monthly cost ceiling per environment using HCP Terraform cost
+# estimation. Advisory by default. This is a no-op unless cost estimation is
+# enabled on the organization (it falls back to 0.0 otherwise).
+
+import "tfrun"
+import "decimal"
+import "strings"
+
+# Maximum proposed monthly cost (USD) per environment.
+monthly_limit = {
+	"dev":     300,
+	"staging": 800,
+	"prod":    3000,
+}
+
+environment = func() {
+	ws = tfrun.workspace.name
+	if strings.has_suffix(ws, "-dev") { return "dev" }
+	if strings.has_suffix(ws, "-staging") { return "staging" }
+	if strings.has_suffix(ws, "-prod") { return "prod" }
+	return "unknown"
+}
+
+env = environment()
+limit = decimal.new(monthly_limit[env] else 0)
+proposed = decimal.new(tfrun.cost_estimate.proposed_monthly_cost else "0.0")
+
+print("Proposed monthly cost:", tfrun.cost_estimate.proposed_monthly_cost else "0.0",
+	"- limit for", env, ":", monthly_limit[env] else 0)
+
+main = rule {
+	proposed.less_than(limit)
+}
