@@ -13,6 +13,7 @@ Packer**, and deploy workloads to **Kubernetes (Amazon EKS)**.
 |------|-------------|
 | [`infra/aws-eks/`](infra/aws-eks/) | Terraform configuration that provisions a VPC and an Amazon EKS cluster (Kubernetes 1.34, Amazon Linux 2023 managed node groups). |
 | [`app/`](app/) | Application source + container build (work in progress). |
+| [`docs/`](docs/) | Runbooks, including [Boundary + Vault credential store](docs/boundary-vault-credential-store.md). |
 
 ## Prerequisites
 

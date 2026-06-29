@@ -3,6 +3,12 @@
 *.tfvars
 !*.tfvars.example
 
+# SSH / private keys — never commit
+*.pem
+*.key
+id_ed25519*
+id_rsa*
+
 # Terraform working files
 **/.terraform/*
 *.tfstate

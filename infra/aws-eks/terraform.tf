@@ -34,6 +34,11 @@ terraform {
       source  = "hashicorp/vault"
       version = "~> 3.18"
     }
+
+    boundary = {
+      source  = "hashicorp/boundary"
+      version = "~> 1.1"
+    }
   }
 
   required_version = ">= 1.7"

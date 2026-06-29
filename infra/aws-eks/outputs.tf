@@ -20,3 +20,8 @@ output "cluster_name" {
   description = "Kubernetes Cluster Name"
   value       = module.eks.cluster_name
 }
+
+output "boundary_ssh_target_id" {
+  description = "Boundary SSH target ID for the EKS nodes (null when disabled)"
+  value       = var.enable_boundary_ssh ? boundary_target.node_ssh[0].id : null
+}
