@@ -1,13 +1,15 @@
 name: nightly-teardown
 
-# Cost backstop: destroy any dev/staging infrastructure left running.
-# Manual by default. Uncomment the schedule to enable nightly teardown once
-# you are comfortable that dev/staging are safe to nuke unattended.
+# Cost backstop: destroy dev/staging infrastructure so it never lives long.
+# Runs automatically every night and can also be triggered on demand.
+#
+# IMPORTANT: scheduled runs only fire from the workflow file on the default
+# branch (main). This must be on main to take effect - see the README.
 
 on:
   workflow_dispatch: {}
-  # schedule:
-  #   - cron: "0 2 * * *"   # 02:00 UTC every day
+  schedule:
+    - cron: "0 2 * * *"   # 02:00 UTC daily - tear down dev/staging overnight
 
 permissions:
   contents: read
