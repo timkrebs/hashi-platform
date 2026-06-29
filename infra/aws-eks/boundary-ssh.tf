@@ -8,7 +8,7 @@
 #   - the run's Vault token needs WRITE on secret/data/boundary/eks-<env>/*
 #   - Boundary admin creds + an existing project scope (boundary_project_id)
 #   - the periodic credential-store token (boundary_cred_store_token)
-#   - a self-managed worker in the cluster tagged env = ["<environment>"]
+#   - hcp_boundary_cluster_id (the worker is deployed and registered here)
 
 locals {
   boundary_ssh_enabled = var.enable_boundary_ssh ? 1 : 0
@@ -75,4 +75,63 @@ resource "boundary_target" "node_ssh" {
   ]
 
   egress_worker_filter = "\"${var.environment}\" in \"/tags/env\""
+}
+
+# 6. Register a self-managed worker (controller-led). The controller mints a
+#    single-use activation token the in-cluster worker reads on first boot.
+resource "boundary_worker" "eks" {
+  count       = local.boundary_ssh_enabled
+  scope_id    = "global"
+  name        = "${local.cluster_name}-worker"
+  description = "Self-managed Boundary worker running inside the EKS cluster"
+}
+
+# 7. Deploy the worker into the cluster via the official Helm chart, tagged so
+#    the target's egress filter selects it. Egress-only to HCP, so no public
+#    address; auth state persists to a PVC via the EBS CSI driver.
+resource "helm_release" "boundary_worker" {
+  count            = local.boundary_ssh_enabled
+  name             = "boundary-worker"
+  namespace        = "boundary"
+  create_namespace = true
+  repository       = "https://helm.releases.hashicorp.com"
+  chart            = "boundary-worker"
+  version          = "0.1.0"
+
+  values = [yamlencode({
+    worker = {
+      config = <<-EOT
+        disable_mlock           = true
+        hcp_boundary_cluster_id = "${var.hcp_boundary_cluster_id}"
+
+        listener "tcp" {
+          address = "0.0.0.0:9202"
+          purpose = "proxy"
+        }
+
+        listener "tcp" {
+          address     = "0.0.0.0:9203"
+          purpose     = "ops"
+          tls_disable = true
+        }
+
+        worker {
+          auth_storage_path                     = "/var/lib/boundary"
+          controller_generated_activation_token = "${boundary_worker.eks[0].controller_generated_activation_token}"
+
+          tags {
+            env     = ["${var.environment}"]
+            cluster = ["${local.cluster_name}"]
+          }
+        }
+      EOT
+
+      persistence = {
+        authStorage = {
+          size = "1Gi"
+          path = "/var/lib/boundary"
+        }
+      }
+    }
+  })]
 }

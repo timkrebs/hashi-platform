@@ -39,6 +39,11 @@ terraform {
       source  = "hashicorp/boundary"
       version = "~> 1.1"
     }
+
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 2.17"
+    }
   }
 
   required_version = ">= 1.7"

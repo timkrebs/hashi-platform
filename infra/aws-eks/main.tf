@@ -75,7 +75,7 @@ module "eks" {
 
       remote_access = var.enable_boundary_ssh ? {
         ec2_ssh_key = aws_key_pair.node_ssh[0].key_name
-      } : null
+      } : {}
     }
 
     two = {
@@ -89,7 +89,7 @@ module "eks" {
 
       remote_access = var.enable_boundary_ssh ? {
         ec2_ssh_key = aws_key_pair.node_ssh[0].key_name
-      } : null
+      } : {}
     }
   }
 }

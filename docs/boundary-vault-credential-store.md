@@ -244,11 +244,13 @@ After storing the private key in Vault (Part A), shred the local copy:
 
 ## Appendix B: Automating it with Terraform
 
-Steps A.1 (key pair), Part A.1 (write to Vault), and Part B (credential store +
-library + target) can be generated on `terraform apply` via
+The key pair, the Vault write, the Boundary store/library/target, **and the
+in-cluster worker** are all generated on `terraform apply` via
 [`infra/aws-eks/boundary-ssh.tf`](../infra/aws-eks/boundary-ssh.tf), gated behind
 `enable_boundary_ssh`. It uses `tls_private_key` + `aws_key_pair`, writes the key
-with `vault_kv_secret_v2`, and creates the Boundary store/library/target.
+with `vault_kv_secret_v2`, creates the Boundary store/library/target, and deploys
+the worker with a `boundary_worker` (controller-led) + `helm_release` tagged
+`env = [var.environment]`.
 
 Prerequisites for the automated path:
 
@@ -257,8 +259,11 @@ Prerequisites for the automated path:
   is read-only, so add a write policy.
 - Boundary admin credentials and an existing project scope (`boundary_project_id`),
   plus the periodic credential-store token from Part A.4.
-- A self-managed worker in the cluster tagged `env = ["<env>"]` to match the
-  target's egress filter.
+- `hcp_boundary_cluster_id` so the worker can register with HCP Boundary.
+
+Note: the worker Helm release deploys into the same cluster this config builds,
+so on a from-scratch apply the cluster must exist first (target the cluster, or
+let an existing cluster be in place).
 
 Note: the generated private key is held in Terraform state (sensitive). Keep
 state in HCP Terraform (encrypted), as this project does.
