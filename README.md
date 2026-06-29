@@ -148,10 +148,11 @@ from all teardown automation. Three layers cooperate:
      -f environment=dev -f action=cycle -f target_url=https://<app-endpoint>
    ```
 
-2. **Scheduled backstop** -
+2. **Scheduled teardown** -
    [`nightly-teardown.yml`](.github/workflows/nightly-teardown.yml) destroys
-   any dev/staging infra left running. Manual by default; uncomment the `cron`
-   to enable nightly teardown.
+   dev/staging every night at 02:00 UTC (and on demand), so the infra never
+   lives more than ~a day. Scheduled runs only fire from the **default branch
+   (`main`)**, so this workflow must be on `main` to take effect.
 
 3. **Native HCP Terraform auto-destroy** (recommended TTL backstop). Set an
    inactivity-based auto-destroy on each ephemeral workspace so it self-destructs
