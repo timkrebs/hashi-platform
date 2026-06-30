@@ -244,13 +244,17 @@ After storing the private key in Vault (Part A), shred the local copy:
 
 ## Appendix B: Automating it with Terraform
 
-The key pair, the Vault write, the Boundary store/library/target, **and the
-in-cluster worker** are all generated on `terraform apply` via
+The key pair, the Vault write, and the Boundary store/library/target are
+generated on `terraform apply` via
 [`infra/aws-eks/boundary-ssh.tf`](../infra/aws-eks/boundary-ssh.tf), gated behind
 `enable_boundary_ssh`. It uses `tls_private_key` + `aws_key_pair`, writes the key
-with `vault_kv_secret_v2`, creates the Boundary store/library/target, and deploys
-the worker with a `boundary_worker` (controller-led) + `helm_release` tagged
-`env = [var.environment]`.
+with `vault_kv_secret_v2`, and creates the Boundary store/library/target.
+
+The **worker is deployed out-of-band**, not by Terraform - deploying the Helm
+chart into the same cluster the apply just built proved brittle (chart-cache and
+pod-readiness timeouts during the run). Deploy it once with the Helm steps
+(Part C of the worker setup), tagged `env = ["<env>"]` to match the target's
+egress filter.
 
 Prerequisites for the automated path:
 
