@@ -82,7 +82,7 @@ resource "boundary_target" "node_ssh" {
 resource "boundary_worker" "eks" {
   count       = local.boundary_ssh_enabled
   scope_id    = "global"
-  name        = "${local.cluster_name}-worker"
+  name        = lower("${local.cluster_name}-worker")
   description = "Self-managed Boundary worker running inside the EKS cluster"
 }
 
