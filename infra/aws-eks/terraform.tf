@@ -40,6 +40,8 @@ terraform {
       version = "~> 1.1"
     }
 
+    # Retained only so Terraform can destroy the previously-failed worker
+    # release left in state. Safe to remove once that destroy has applied.
     helm = {
       source  = "hashicorp/helm"
       version = "~> 2.17"

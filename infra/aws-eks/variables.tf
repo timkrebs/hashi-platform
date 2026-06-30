@@ -59,12 +59,6 @@ variable "boundary_addr" {
   default     = ""
 }
 
-variable "hcp_boundary_cluster_id" {
-  description = "HCP Boundary cluster ID (the UUID segment of the Boundary address) the worker registers with."
-  type        = string
-  default     = ""
-}
-
 variable "boundary_auth_method_id" {
   description = "Boundary password auth method ID (ampw_...) Terraform uses to authenticate."
   type        = string

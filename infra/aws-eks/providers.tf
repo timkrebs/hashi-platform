@@ -9,14 +9,13 @@ provider "aws" {
   }
 }
 
-# Short-lived token to authenticate the Helm provider to the EKS API. Uses the
-# AWS provider's STS (no aws CLI needed), so it works in HCP Terraform runs.
+# Retained only so Terraform can destroy the previously-failed boundary-worker
+# Helm release left in state. The worker is now deployed out-of-band. Safe to
+# remove this provider + data source once that destroy has applied.
 data "aws_eks_cluster_auth" "this" {
   name = module.eks.cluster_name
 }
 
-# Deploys the Boundary worker chart into the cluster. The Helm provider connects
-# lazily, so it is a no-op when enable_boundary_ssh = false.
 provider "helm" {
   kubernetes {
     host                   = module.eks.cluster_endpoint
