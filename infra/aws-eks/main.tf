@@ -73,9 +73,7 @@ module "eks" {
       max_size     = 3
       desired_size = 2
 
-      remote_access = var.enable_boundary_ssh ? {
-        ec2_ssh_key = aws_key_pair.node_ssh[0].key_name
-      } : {}
+      key_name = var.enable_boundary_ssh ? aws_key_pair.node_ssh[0].key_name : null
     }
 
     two = {
@@ -87,9 +85,7 @@ module "eks" {
       max_size     = 2
       desired_size = 1
 
-      remote_access = var.enable_boundary_ssh ? {
-        ec2_ssh_key = aws_key_pair.node_ssh[0].key_name
-      } : {}
+      key_name = var.enable_boundary_ssh ? aws_key_pair.node_ssh[0].key_name : null
     }
   }
 }
