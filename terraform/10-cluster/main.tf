@@ -98,11 +98,15 @@ module "eks" {
   eks_managed_node_group_defaults = {
     ami_type = "AL2023_x86_64_STANDARD"
 
+    # The module-derived role name "<name>-eks-node-group-" exceeds the
+    # 38-char IAM name_prefix limit; use exact iam_role_name instead
+    iam_role_use_name_prefix = false
   }
 
   eks_managed_node_groups = {
     one = {
-      name = "${local.name_prefix}-eks-ng-default"
+      name          = "${local.name_prefix}-eks-ng-default"
+      iam_role_name = "${local.name_prefix}-eks-ng-default-role"
 
       instance_types = ["t3.medium"]
 
@@ -112,7 +116,8 @@ module "eks" {
     }
 
     two = {
-      name = "${local.name_prefix}-eks-ng-spare"
+      name          = "${local.name_prefix}-eks-ng-spare"
+      iam_role_name = "${local.name_prefix}-eks-ng-spare-role"
 
       instance_types = ["t3.medium"]
 
