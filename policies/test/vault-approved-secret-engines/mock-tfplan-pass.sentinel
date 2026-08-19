@@ -1,0 +1,33 @@
+# Mirrors terraform/20-vault-config as written today: kv-v2 and pki mounts
+resource_changes = {
+	"vault_mount.kv_v2": {
+		"address":        "vault_mount.kv_v2",
+		"module_address": "",
+		"mode":           "managed",
+		"type":           "vault_mount",
+		"name":           "kv_v2",
+		"provider_name":  "registry.terraform.io/hashicorp/vault",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"path": "kv-v2",
+				"type": "kv-v2",
+			},
+		},
+	},
+	"vault_mount.pki": {
+		"address":        "vault_mount.pki",
+		"module_address": "",
+		"mode":           "managed",
+		"type":           "vault_mount",
+		"name":           "pki",
+		"provider_name":  "registry.terraform.io/hashicorp/vault",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"path": "pki",
+				"type": "pki",
+			},
+		},
+	},
+}

@@ -1,0 +1,7 @@
+# A workspace trying to deploy outside the approved regions
+variables = {
+	"region": {
+		"name":  "region",
+		"value": "ap-southeast-2",
+	},
+}

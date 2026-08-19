@@ -1,0 +1,18 @@
+# A workspace trying to mount an unapproved secret engine
+resource_changes = {
+	"vault_mount.ssh": {
+		"address":        "vault_mount.ssh",
+		"module_address": "",
+		"mode":           "managed",
+		"type":           "vault_mount",
+		"name":           "ssh",
+		"provider_name":  "registry.terraform.io/hashicorp/vault",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"path": "ssh",
+				"type": "ssh",
+			},
+		},
+	},
+}

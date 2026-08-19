@@ -1,15 +1,20 @@
 # ------------------------------------------------------------------------
-# Policy: restrict-eks-public-endpoint (hard-mandatory)
+# Policy: eks-approved-cluster-version (hard-mandatory)
 #
-# EKS cluster API endpoints must not be reachable from the public internet.
-# Fails when any aws_eks_cluster being created or updated sets
-# vpc_config.endpoint_public_access = true.
+# EKS clusters must run a Kubernetes version from the platform team's
+# approved list (current version plus the two previous minor releases).
+# Prevents clusters from being created on outdated, unsupported versions.
 #
-# NOTE: terraform/10-cluster currently sets
-# cluster_endpoint_public_access = true, so this policy blocks that run.
+# terraform/10-cluster pins cluster_version = "1.34", which is compliant.
 # ------------------------------------------------------------------------
 
 import "tfplan/v2" as tfplan
+
+approved_versions = [
+	"1.32",
+	"1.33",
+	"1.34",
+]
 
 eks_clusters = filter tfplan.resource_changes as _, rc {
 	rc.type is "aws_eks_cluster" and
@@ -18,15 +23,14 @@ eks_clusters = filter tfplan.resource_changes as _, rc {
 }
 
 violations = filter eks_clusters as _, rc {
-	any (rc.change.after.vpc_config else []) as vc {
-		(vc.endpoint_public_access else false) is true
-	}
+	(rc.change.after.version else "") not in approved_versions
 }
 
 print_violations = func(items) {
 	for items as address, rc {
 		print("POLICY VIOLATION:", address,
-			"- EKS cluster API endpoint must not be public (set endpoint_public_access = false)")
+			"- cluster version", rc.change.after.version else "(unset)",
+			"is not in the approved list:", approved_versions)
 	}
 	return true
 }

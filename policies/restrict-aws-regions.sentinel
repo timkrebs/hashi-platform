@@ -1,0 +1,36 @@
+# ------------------------------------------------------------------------
+# Policy: restrict-aws-regions (hard-mandatory)
+#
+# Workspaces may only deploy into the platform's approved regions
+# (matching the naming convention tokens euc1, eun1, use1). Checks the
+# workspace's `region` input variable; workspaces without a region
+# variable (e.g. 20-vault-config) are not affected.
+#
+# terraform/10-cluster defaults to eu-central-1, which is compliant.
+# ------------------------------------------------------------------------
+
+import "tfplan/v2" as tfplan
+
+approved_regions = [
+	"eu-central-1",
+	"eu-north-1",
+	"us-east-1",
+]
+
+region = tfplan.variables.region.value else null
+
+compliant = region is null or region in approved_regions
+
+report = func(ok) {
+	if not ok {
+		print("POLICY VIOLATION: region", region,
+			"is not in the approved regions list:", approved_regions)
+	}
+	return true
+}
+
+reported = report(compliant)
+
+main = rule {
+	compliant
+}

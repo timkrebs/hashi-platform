@@ -1,0 +1,7 @@
+# Mirrors terraform/10-cluster as written today: region = eu-central-1
+variables = {
+	"region": {
+		"name":  "region",
+		"value": "eu-central-1",
+	},
+}

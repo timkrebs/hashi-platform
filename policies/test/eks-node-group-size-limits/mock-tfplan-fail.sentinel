@@ -1,0 +1,24 @@
+# A node group scaled far beyond the cost guardrail (max 5)
+resource_changes = {
+	"module.eks.module.eks_managed_node_group[\"one\"].aws_eks_node_group.this[0]": {
+		"address":        "module.eks.module.eks_managed_node_group[\"one\"].aws_eks_node_group.this[0]",
+		"module_address": "module.eks.module.eks_managed_node_group[\"one\"]",
+		"mode":           "managed",
+		"type":           "aws_eks_node_group",
+		"name":           "this",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"node_group_name": "node-group-1",
+				"scaling_config": [
+					{
+						"min_size":     1,
+						"max_size":     20,
+						"desired_size": 10,
+					},
+				],
+			},
+		},
+	},
+}

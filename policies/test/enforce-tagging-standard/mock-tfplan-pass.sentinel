@@ -1,0 +1,95 @@
+# Mirrors terraform/10-cluster as written today: default_tags provide
+# prefix/env/region on every resource (tags_all), Name tags follow
+# {prefix}-{env}-{region}-{component}[-{qualifier}][-{az}]
+resource_changes = {
+	"module.vpc.aws_vpc.this[0]": {
+		"address":        "module.vpc.aws_vpc.this[0]",
+		"module_address": "module.vpc",
+		"mode":           "managed",
+		"type":           "aws_vpc",
+		"name":           "this",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"cidr_block": "10.0.0.0/16",
+				"tags": {
+					"Name": "hp-dev-euc1-vpc",
+				},
+				"tags_all": {
+					"Name":   "hp-dev-euc1-vpc",
+					"prefix": "hp",
+					"env":    "dev",
+					"region": "euc1",
+				},
+			},
+		},
+	},
+	"module.vpc.aws_subnet.private[0]": {
+		"address":        "module.vpc.aws_subnet.private[0]",
+		"module_address": "module.vpc",
+		"mode":           "managed",
+		"type":           "aws_subnet",
+		"name":           "private",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"cidr_block": "10.0.1.0/24",
+				"tags": {
+					"Name": "hp-dev-euc1-snet-private-1a",
+					"kubernetes.io/role/internal-elb": "1",
+				},
+				"tags_all": {
+					"Name": "hp-dev-euc1-snet-private-1a",
+					"kubernetes.io/role/internal-elb": "1",
+					"prefix": "hp",
+					"env":    "dev",
+					"region": "euc1",
+				},
+			},
+		},
+	},
+	# EKS cluster has no Name tag - only the mandatory keys are checked
+	"module.eks.aws_eks_cluster.this[0]": {
+		"address":        "module.eks.aws_eks_cluster.this[0]",
+		"module_address": "module.eks",
+		"mode":           "managed",
+		"type":           "aws_eks_cluster",
+		"name":           "this",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"name": "hp-dev-euc1-eks",
+				"tags": {},
+				"tags_all": {
+					"prefix": "hp",
+					"env":    "dev",
+					"region": "euc1",
+				},
+			},
+		},
+	},
+	# Node group with only `tags` (no tags_all) - exercises the fallback
+	"module.eks.module.eks_managed_node_group[\"one\"].aws_eks_node_group.this[0]": {
+		"address":        "module.eks.module.eks_managed_node_group[\"one\"].aws_eks_node_group.this[0]",
+		"module_address": "module.eks.module.eks_managed_node_group[\"one\"]",
+		"mode":           "managed",
+		"type":           "aws_eks_node_group",
+		"name":           "this",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"node_group_name": "hp-dev-euc1-eks-ng-default",
+				"tags": {
+					"Name":   "hp-dev-euc1-eks-ng-default",
+					"prefix": "hp",
+					"env":    "dev",
+					"region": "euc1",
+				},
+			},
+		},
+	},
+}

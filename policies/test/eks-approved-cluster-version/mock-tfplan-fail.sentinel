@@ -1,3 +1,4 @@
+# A cluster pinned to an outdated, unsupported Kubernetes version
 resource_changes = {
 	"module.eks.aws_eks_cluster.this[0]": {
 		"address":        "module.eks.aws_eks_cluster.this[0]",
@@ -9,13 +10,8 @@ resource_changes = {
 		"change": {
 			"actions": ["create"],
 			"after": {
-				"name": "hp-dev-euc1-eks",
-				"vpc_config": [
-					{
-						"endpoint_public_access":  false,
-						"endpoint_private_access": true,
-					},
-				],
+				"name":    "hp-dev-euc1-eks",
+				"version": "1.21",
 			},
 		},
 	},

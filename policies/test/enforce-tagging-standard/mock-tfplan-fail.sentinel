@@ -1,0 +1,26 @@
+# Violations: missing prefix/region tags, env outside dev|stg|prd,
+# and a Name that does not follow the naming convention
+resource_changes = {
+	"aws_vpc.legacy": {
+		"address":        "aws_vpc.legacy",
+		"module_address": "",
+		"mode":           "managed",
+		"type":           "aws_vpc",
+		"name":           "legacy",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"cidr_block": "10.1.0.0/16",
+				"tags": {
+					"Name": "legacy-vpc",
+					"env":  "production",
+				},
+				"tags_all": {
+					"Name": "legacy-vpc",
+					"env":  "production",
+				},
+			},
+		},
+	},
+}

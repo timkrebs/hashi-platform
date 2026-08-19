@@ -1,0 +1,40 @@
+# ------------------------------------------------------------------------
+# Policy: eks-node-group-size-limits (advisory)
+#
+# EKS managed node groups should stay within the platform's scaling
+# guardrails: at least 1 node (availability) and at most 5 nodes (cost).
+# Advisory only: the run proceeds, but oversized groups are called out.
+#
+# terraform/10-cluster uses min 1 / max 3 and min 1 / max 2 - compliant.
+# ------------------------------------------------------------------------
+
+import "tfplan/v2" as tfplan
+
+min_nodes = 1
+max_nodes = 5
+
+node_groups = filter tfplan.resource_changes as _, rc {
+	rc.type is "aws_eks_node_group" and
+		rc.mode is "managed" and
+		(rc.change.actions contains "create" or rc.change.actions contains "update")
+}
+
+violations = filter node_groups as _, rc {
+	any (rc.change.after.scaling_config else []) as sc {
+		(sc.min_size else 0) < min_nodes or (sc.max_size else 0) > max_nodes
+	}
+}
+
+print_violations = func(items) {
+	for items as address, rc {
+		print("POLICY VIOLATION:", address,
+			"- node group scaling must stay within min", min_nodes, "/ max", max_nodes)
+	}
+	return true
+}
+
+reported = print_violations(violations)
+
+main = rule {
+	length(violations) is 0
+}
