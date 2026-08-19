@@ -1,0 +1,22 @@
+resource_changes = {
+	"module.eks.aws_eks_cluster.this[0]": {
+		"address":        "module.eks.aws_eks_cluster.this[0]",
+		"module_address": "module.eks",
+		"mode":           "managed",
+		"type":           "aws_eks_cluster",
+		"name":           "this",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"name": "hp-dev-euc1-eks",
+				"vpc_config": [
+					{
+						"endpoint_public_access":  false,
+						"endpoint_private_access": true,
+					},
+				],
+			},
+		},
+	},
+}

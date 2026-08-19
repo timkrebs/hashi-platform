@@ -1,0 +1,38 @@
+# ------------------------------------------------------------------------
+# Policy: restrict-eks-public-endpoint (hard-mandatory)
+#
+# EKS cluster API endpoints must not be reachable from the public internet.
+# Fails when any aws_eks_cluster being created or updated sets
+# vpc_config.endpoint_public_access = true.
+#
+# NOTE: terraform/10-cluster currently sets
+# cluster_endpoint_public_access = true, so this policy blocks that run.
+# ------------------------------------------------------------------------
+
+import "tfplan/v2" as tfplan
+
+eks_clusters = filter tfplan.resource_changes as _, rc {
+	rc.type is "aws_eks_cluster" and
+		rc.mode is "managed" and
+		(rc.change.actions contains "create" or rc.change.actions contains "update")
+}
+
+violations = filter eks_clusters as _, rc {
+	any (rc.change.after.vpc_config else []) as vc {
+		(vc.endpoint_public_access else false) is true
+	}
+}
+
+print_violations = func(items) {
+	for items as address, rc {
+		print("POLICY VIOLATION:", address,
+			"- EKS cluster API endpoint must not be public (set endpoint_public_access = false)")
+	}
+	return true
+}
+
+reported = print_violations(violations)
+
+main = rule {
+	length(violations) is 0
+}
