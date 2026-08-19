@@ -3,9 +3,14 @@
 
 provider "aws" {
   region = var.region
+
+  # Applied to every taggable AWS resource in this configuration
+  default_tags {
+    tags = local.common_tags
+  }
 }
 
-# Filter out local zones, which are not currently supported 
+# Filter out local zones, which are not currently supported
 # with managed node groups
 data "aws_availability_zones" "available" {
   filter {
@@ -15,7 +20,26 @@ data "aws_availability_zones" "available" {
 }
 
 locals {
-  cluster_name = "${var.cluster_name}"
+  # Naming convention: {prefix}-{env}-{region}-{component}[-{qualifier}][-{az}]
+  # e.g. hp-dev-euc1-eks-ng-default
+  region_short = {
+    "eu-central-1" = "euc1"
+    "eu-north-1"   = "eun1"
+    "us-east-1"    = "use1"
+  }
+
+  name_prefix = "${var.prefix}-${var.env}-${local.region_short[var.region]}"
+
+  vpc_name     = "${local.name_prefix}-vpc"
+  cluster_name = "${local.name_prefix}-eks"
+
+  azs = slice(data.aws_availability_zones.available.names, 0, 3)
+
+  common_tags = {
+    prefix = var.prefix
+    env    = var.env
+    region = local.region_short[var.region]
+  }
 }
 
 resource "random_string" "suffix" {
@@ -27,13 +51,17 @@ module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "5.8.1"
 
-  name = var.vpc_name
+  name = local.vpc_name
 
   cidr = "10.0.0.0/16"
-  azs  = slice(data.aws_availability_zones.available.names, 0, 3)
+  azs  = local.azs
 
   private_subnets = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
   public_subnets  = ["10.0.4.0/24", "10.0.5.0/24", "10.0.6.0/24"]
+
+  # Subnet names carry the {az} token, e.g. hp-dev-euc1-snet-private-1a
+  private_subnet_names = [for az in local.azs : "${local.name_prefix}-snet-private-${substr(az, length(az) - 2, 2)}"]
+  public_subnet_names  = [for az in local.azs : "${local.name_prefix}-snet-public-${substr(az, length(az) - 2, 2)}"]
 
   enable_nat_gateway   = true
   single_nat_gateway   = true
@@ -74,7 +102,7 @@ module "eks" {
 
   eks_managed_node_groups = {
     one = {
-      name = "node-group-1"
+      name = "${local.name_prefix}-eks-ng-default"
 
       instance_types = ["t3.medium"]
 
@@ -84,7 +112,7 @@ module "eks" {
     }
 
     two = {
-      name = "node-group-2"
+      name = "${local.name_prefix}-eks-ng-spare"
 
       instance_types = ["t3.medium"]
 
@@ -96,7 +124,7 @@ module "eks" {
 }
 
 
-# https://aws.amazon.com/blogs/containers/amazon-ebs-csi-driver-is-now-generally-available-in-amazon-eks-add-ons/ 
+# https://aws.amazon.com/blogs/containers/amazon-ebs-csi-driver-is-now-generally-available-in-amazon-eks-add-ons/
 data "aws_iam_policy" "ebs_csi_policy" {
   arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
 }
