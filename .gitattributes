@@ -1,0 +1,21 @@
+# Normalise line endings; Terraform and shell tooling expect LF.
+* text=auto eol=lf
+
+*.tf         text
+*.tfvars     text
+*.hcl        text
+*.tftest.hcl text linguist-language=HCL
+*.md         text
+*.yml        text
+*.yaml       text
+*.json       text
+*.sh         text eol=lf
+Makefile     text eol=lf
+
+# Lock files are machine-generated; collapse them in pull request diffs.
+.terraform.lock.hcl linguist-generated=true
+
+*.png binary
+*.jpg binary
+*.gif binary
+*.pdf binary

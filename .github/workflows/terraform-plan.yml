@@ -1,0 +1,209 @@
+# Pull requests into an environment branch (dev, staging, production):
+#   1. static checks: fmt, tflint, validate, module unit tests
+#   2. a speculative HCP Terraform plan for that environment, posted on the PR
+#
+# The target branch selects the environment: a PR into `staging` plans
+# infra/environments/staging against the hashi-platform-staging workspace.
+# Runs execute remotely in HCP Terraform, so the only secret needed here is
+# TF_API_TOKEN (an HCP Terraform team token with plan access to the workspaces).
+name: Terraform plan
+
+on:
+  pull_request:
+    branches: [dev, staging, production]
+    paths:
+      - "infra/**"
+      - ".tflint.hcl"
+      - ".github/workflows/terraform-*.yml"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: terraform-plan-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  # Newest 1.16.x, matching the "~> 1.16.0" pin in the environment roots.
+  TERRAFORM_VERSION: "<1.17.0"
+  TFLINT_VERSION: v0.61.0
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+
+jobs:
+  resolve:
+    name: Resolve environment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      directory: ${{ steps.env.outputs.directory }}
+      ready: ${{ steps.env.outputs.ready }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: env
+        env:
+          TARGET_BRANCH: ${{ github.base_ref }}
+        run: |
+          directory="infra/environments/${TARGET_BRANCH}"
+          if [ -f "${directory}/main.tf" ]; then
+            ready=true
+          else
+            ready=false
+            echo "::notice::${directory}/main.tf does not exist yet; validate and plan are skipped for ${TARGET_BRANCH}."
+          fi
+          {
+            echo "environment=${TARGET_BRANCH}"
+            echo "directory=${directory}"
+            echo "ready=${ready}"
+          } >> "$GITHUB_OUTPUT"
+
+  checks:
+    name: Static checks
+    runs-on: ubuntu-latest
+    needs: resolve
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive -diff infra
+
+      - uses: terraform-linters/setup-tflint@v6
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+          github_token: ${{ github.token }}
+
+      # Lints the modules and the target environment only, so an environment
+      # directory that is still being built out does not block other branches.
+      - name: tflint
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DIRECTORY: ${{ needs.resolve.outputs.directory }}
+          READY: ${{ needs.resolve.outputs.ready }}
+        run: |
+          tflint --init --config "$PWD/.tflint.hcl"
+          for dir in infra/modules/*/; do
+            tflint --chdir="${dir}" --config "$PWD/.tflint.hcl" --format compact
+          done
+          if [ "${READY}" = "true" ]; then
+            tflint --chdir="${DIRECTORY}" --config "$PWD/.tflint.hcl" --format compact
+          fi
+
+      - name: Validate modules and run unit tests
+        run: |
+          for module in infra/modules/*/; do
+            echo "::group::${module}"
+            terraform -chdir="${module}" init -backend=false
+            terraform -chdir="${module}" validate
+            terraform -chdir="${module}" test
+            echo "::endgroup::"
+          done
+
+      - name: Validate ${{ needs.resolve.outputs.environment }} root
+        if: needs.resolve.outputs.ready == 'true'
+        env:
+          DIRECTORY: ${{ needs.resolve.outputs.directory }}
+        run: |
+          terraform -chdir="${DIRECTORY}" init -backend=false
+          terraform -chdir="${DIRECTORY}" validate
+
+  plan:
+    name: Plan ${{ needs.resolve.outputs.environment }}
+    runs-on: ubuntu-latest
+    needs: [resolve, checks]
+    if: needs.resolve.outputs.ready == 'true'
+    env:
+      ENVIRONMENT: ${{ needs.resolve.outputs.environment }}
+    defaults:
+      run:
+        working-directory: ${{ needs.resolve.outputs.directory }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: terraform init
+        run: terraform init
+
+      # Without -out this is a speculative plan: HCP Terraform records it but it
+      # can never be applied.
+      - name: Speculative plan
+        id: plan
+        run: terraform plan -no-color -var-file="${ENVIRONMENT}.tfvars" 2>&1 | tee plan.txt
+
+      - name: Build plan report
+        if: always() && steps.plan.outcome != 'skipped'
+        env:
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+          MARKER: "<!-- terraform-plan:${{ needs.resolve.outputs.environment }} -->"
+        run: |
+          status_line=$(grep -E '^(Plan:|No changes\.|Error:)' plan.txt | head -n 1 || true)
+          run_url=$(grep -Eo 'https://app\.terraform\.io/app/[^[:space:]]+' plan.txt | head -n 1 || true)
+          if [ "${PLAN_OUTCOME}" = "success" ]; then icon="✅"; else icon="❌"; fi
+          : "${status_line:=Plan ${PLAN_OUTCOME}; see output below}"
+
+          # Keep the comment under GitHub's 65,536 character limit.
+          if [ "$(wc -c < plan.txt)" -gt 60000 ]; then
+            head -c 60000 plan.txt > plan-trimmed.txt
+            printf '\n\n... output truncated; open the HCP Terraform run for the full plan.\n' >> plan-trimmed.txt
+          else
+            cp plan.txt plan-trimmed.txt
+          fi
+
+          {
+            echo "${MARKER}"
+            echo "### ${icon} Terraform plan for \`${ENVIRONMENT}\`"
+            echo
+            echo "**${status_line}**"
+            if [ -n "${run_url}" ]; then
+              echo
+              echo "HCP Terraform run: ${run_url}"
+            fi
+            echo
+            echo "<details><summary>Plan output</summary>"
+            echo
+            echo '```text'
+            cat plan-trimmed.txt
+            echo '```'
+            echo
+            echo "</details>"
+            echo
+            echo "_Commit ${GITHUB_SHA} · [workflow run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})_"
+          } > plan-report.md
+
+          cat plan-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment on pull request
+        if: always() && steps.plan.outcome != 'skipped'
+        uses: actions/github-script@v9
+        env:
+          REPORT_PATH: ${{ needs.resolve.outputs.directory }}/plan-report.md
+          MARKER: "<!-- terraform-plan:${{ needs.resolve.outputs.environment }} -->"
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            const marker = process.env.MARKER;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100,
+            });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }

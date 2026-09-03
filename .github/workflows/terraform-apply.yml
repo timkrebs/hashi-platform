@@ -1,0 +1,197 @@
+# Pushes to an environment branch (dev, staging, production):
+#   1. plan in HCP Terraform and save the plan
+#   2. apply exactly that saved plan, behind the GitHub environment's protection
+#      rules (required reviewers on staging and production)
+#
+# The branch selects the environment and therefore the HCP Terraform workspace
+# named in that environment's terraform.tf. Nothing is applied when the plan
+# reports no changes. `workflow_dispatch` re-runs the same flow for the branch
+# it is started from, which is useful after a failed apply.
+name: Terraform apply
+
+on:
+  push:
+    branches: [dev, staging, production]
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform-apply.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy per environment at a time; queued pushes wait instead of racing.
+concurrency:
+  group: terraform-apply-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TERRAFORM_VERSION: "<1.17.0"
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+
+jobs:
+  resolve:
+    name: Resolve environment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      directory: ${{ steps.env.outputs.directory }}
+      ready: ${{ steps.env.outputs.ready }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: env
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          case "${BRANCH}" in
+            dev|staging|production) ;;
+            *)
+              echo "::error::Start this workflow from dev, staging or production, not '${BRANCH}'."
+              exit 1
+              ;;
+          esac
+          directory="infra/environments/${BRANCH}"
+          if [ -f "${directory}/main.tf" ]; then
+            ready=true
+          else
+            ready=false
+            echo "::notice::${directory}/main.tf does not exist yet; nothing to deploy for ${BRANCH}."
+          fi
+          {
+            echo "environment=${BRANCH}"
+            echo "directory=${directory}"
+            echo "ready=${ready}"
+          } >> "$GITHUB_OUTPUT"
+
+  plan:
+    name: Plan ${{ needs.resolve.outputs.environment }}
+    runs-on: ubuntu-latest
+    needs: resolve
+    if: needs.resolve.outputs.ready == 'true'
+    outputs:
+      changes: ${{ steps.plan.outputs.changes }}
+      run_url: ${{ steps.plan.outputs.run_url }}
+    env:
+      ENVIRONMENT: ${{ needs.resolve.outputs.environment }}
+    defaults:
+      run:
+        working-directory: ${{ needs.resolve.outputs.directory }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: terraform init
+        run: terraform init
+
+      # -out creates a real (applyable) run in HCP Terraform; the local tfplan
+      # file is only a reference to it. -detailed-exitcode returns 2 when the
+      # plan contains changes, which is what gates the apply job.
+      - name: Plan and save
+        id: plan
+        run: |
+          set +e
+          terraform plan -no-color -detailed-exitcode -out=tfplan -var-file="${ENVIRONMENT}.tfvars" 2>&1 | tee plan.txt
+          exit_code=${PIPESTATUS[0]}
+          set -e
+
+          run_url=$(grep -Eo 'https://app\.terraform\.io/app/[^[:space:]]+' plan.txt | head -n 1 || true)
+          status_line=$(grep -E '^(Plan:|No changes\.|Error:)' plan.txt | head -n 1 || true)
+          echo "run_url=${run_url}" >> "$GITHUB_OUTPUT"
+
+          case "${exit_code}" in
+            0) changes=false ;;
+            2) changes=true ;;
+            *) changes=false ;;
+          esac
+          echo "changes=${changes}" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Terraform plan for \`${ENVIRONMENT}\`"
+            echo
+            echo "**${status_line:-Plan exited with code ${exit_code}}**"
+            if [ -n "${run_url}" ]; then
+              echo
+              echo "HCP Terraform run: ${run_url}"
+            fi
+            echo
+            echo "<details><summary>Plan output</summary>"
+            echo
+            echo '```text'
+            cat plan.txt
+            echo '```'
+            echo
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${exit_code}" != "0" ] && [ "${exit_code}" != "2" ]; then
+            exit "${exit_code}"
+          fi
+
+      - name: Upload saved plan
+        if: steps.plan.outputs.changes == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tfplan-${{ needs.resolve.outputs.environment }}-${{ github.sha }}
+          path: ${{ needs.resolve.outputs.directory }}/tfplan
+          retention-days: 1
+          if-no-files-found: error
+
+  apply:
+    name: Apply ${{ needs.resolve.outputs.environment }}
+    runs-on: ubuntu-latest
+    needs: [resolve, plan]
+    if: needs.plan.outputs.changes == 'true'
+    # Protection rules (required reviewers, wait timers) are configured on the
+    # GitHub environment of the same name. Rejecting here leaves the HCP run in
+    # "planned and saved"; discard it in the HCP Terraform UI.
+    environment:
+      name: ${{ needs.resolve.outputs.environment }}
+      url: ${{ needs.plan.outputs.run_url }}
+    env:
+      ENVIRONMENT: ${{ needs.resolve.outputs.environment }}
+    defaults:
+      run:
+        working-directory: ${{ needs.resolve.outputs.directory }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: tfplan-${{ needs.resolve.outputs.environment }}-${{ github.sha }}
+          path: ${{ needs.resolve.outputs.directory }}
+
+      - name: terraform init
+        run: terraform init
+
+      - name: Apply saved plan
+        run: terraform apply -no-color tfplan 2>&1 | tee apply.txt
+
+      - name: Apply summary
+        if: always()
+        run: |
+          {
+            echo "### Terraform apply for \`${ENVIRONMENT}\`"
+            echo
+            echo "**$(grep -E '^(Apply complete!|Error:)' apply.txt | head -n 1 || echo 'See output below')**"
+            echo
+            echo "<details><summary>Apply output</summary>"
+            echo
+            echo '```text'
+            cat apply.txt
+            echo '```'
+            echo
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
