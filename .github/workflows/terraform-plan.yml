@@ -10,7 +10,7 @@ name: Terraform plan
 
 on:
   pull_request:
-    branches: [dev, staging, production]
+    branches: [dev, staging, prod]
     paths:
       - "infra/**"
       - ".tflint.hcl"

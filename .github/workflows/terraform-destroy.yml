@@ -18,7 +18,7 @@ name: Terraform destroy
 on:
   pull_request:
     types: [closed]
-    branches: [staging, production]
+    branches: [staging, prod]
   workflow_dispatch:
     inputs:
       environment:

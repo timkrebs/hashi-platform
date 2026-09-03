@@ -11,7 +11,7 @@ name: Terraform apply
 
 on:
   push:
-    branches: [dev, staging, production]
+    branches: [dev, staging, prod]
     paths:
       - "infra/**"
       - ".github/workflows/terraform-apply.yml"
