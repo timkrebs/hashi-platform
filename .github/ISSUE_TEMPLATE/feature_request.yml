@@ -1,0 +1,41 @@
+name: Feature request
+description: Propose a module capability, environment change or pipeline improvement
+title: "[feat]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - aws-vpc module
+        - aws-eks-cluster module
+        - Environments
+        - CI workflows
+        - Tooling or documentation
+        - New module
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can you not do today, or what is harder than it should be?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Interface sketch (new variables, outputs, defaults) if you have one.
+      render: hcl
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I am willing to open a pull request for this

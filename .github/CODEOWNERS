@@ -1,0 +1,8 @@
+# Reviews are requested automatically from the owners listed here.
+# Later matches take precedence.
+
+*                                   @timkrebs
+
+/infra/modules/                     @timkrebs
+/infra/environments/production/     @timkrebs
+/.github/                           @timkrebs

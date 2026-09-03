@@ -1,0 +1,59 @@
+name: Bug report
+description: Something plans, applies or validates incorrectly
+title: "[bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please redact account IDs, ARNs and anything sensitive from output you paste.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - aws-vpc module
+        - aws-eks-cluster module
+        - dev environment
+        - staging environment
+        - production environment
+        - CI workflows
+        - Documentation
+    validations:
+      required: true
+  - type: input
+    id: terraform-version
+    attributes:
+      label: Terraform version
+      placeholder: "1.16.1"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. make check
+        2. make plan ENV=dev
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output
+      description: Plan, apply, validate or test output. Rendered as a code block automatically.
+      render: text
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant configuration
+      description: Module call, variable values or tfvars excerpt, without secrets.
+      render: hcl

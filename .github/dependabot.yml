@@ -4,3 +4,15 @@ updates:
     directory: /
     schedule:
       interval: daily
+
+  # Providers and registry modules pinned in the modules and environment roots.
+  - package-ecosystem: terraform
+    directories:
+      - "/infra/modules/*"
+      - "/infra/environments/*"
+    schedule:
+      interval: weekly
+    groups:
+      terraform-providers:
+        patterns:
+          - "hashicorp/*"
