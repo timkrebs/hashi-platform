@@ -96,7 +96,10 @@ needs no AWS credentials.
 | `production` | `infra/environments/production` | `hashi-platform-production` |
 
 Feature work goes into `dev` by pull request; promotion is a pull request from
-`dev` to `staging` and from `staging` to `production`. Merging applies.
+`dev` to `staging` and from `staging` to `production`. Merging applies, and
+promoting an environment destroys the one it came from: `dev` and `staging`
+are ephemeral, torn down on promotion or after a day without runs, while
+`production` is permanent.
 
 ## Contributing
 

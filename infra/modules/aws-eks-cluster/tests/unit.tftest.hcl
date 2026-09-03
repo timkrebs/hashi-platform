@@ -237,3 +237,13 @@ run "rejects_overriding_managed_addon" {
 
   expect_failures = [var.cluster_addons]
 }
+
+run "rejects_kms_deletion_window_outside_aws_range" {
+  command = plan
+
+  variables {
+    kms_key_deletion_window_in_days = 3
+  }
+
+  expect_failures = [var.kms_key_deletion_window_in_days]
+}

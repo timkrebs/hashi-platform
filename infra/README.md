@@ -50,7 +50,9 @@ the root module only; modules never reference each other directly.
 
 Changes flow dev → staging → production by pull request between the branches.
 Each root module names its workspace in `terraform.tf`, so the branch alone
-decides where a run lands.
+decides where a run lands. `dev` and `staging` are ephemeral and are torn
+down when they are promoted or left idle; see
+[Ephemeral environments](#ephemeral-environments).
 
 ## Prerequisites
 
@@ -109,6 +111,14 @@ on manual dispatch:
    same name, so required reviewers and wait timers configured there gate
    the apply. Exactly the saved plan is applied, not a fresh one.
 
+**`terraform-destroy.yml`** runs when a promotion pull request is merged
+(`dev → staging` destroys dev, `staging → production` destroys staging) and
+on manual dispatch for dev or staging. It checks out the environment's own
+branch and runs `terraform destroy` as a remote run, bound to that
+environment's GitHub environment and sharing the apply workflow's concurrency
+group. Production is never a target. Details under
+[Ephemeral environments](#ephemeral-environments).
+
 One-time setup:
 
 - **HCP Terraform**: one workspace per environment in the `hashi-platform`
@@ -117,8 +127,9 @@ One-time setup:
   directory matters: without it the CLI uploads only the environment folder
   and remote runs fail with "Unreadable module directory" because
   `../../modules` is missing. With it, the CLI uploads the whole repository
-  and runs in the subdirectory. Create a team (for example `ci`) with *plan*
-  and *apply* on those workspaces and generate a team token for it.
+  and runs in the subdirectory. On the dev and staging workspaces also set
+  `auto-destroy-activity-duration` to `1d`. Create a team (for example `ci`)
+  with *plan* and *apply* on those workspaces and generate a team token for it.
 - **GitHub secret** `TF_API_TOKEN` (repository level) holding that team token.
   The pull request plan job runs outside any GitHub environment, so the token
   must be available at repository level. For tighter control, add
@@ -133,6 +144,51 @@ One-time setup:
 If a reviewer rejects an apply, the HCP Terraform run stays in
 *planned and saved*; discard it from the HCP Terraform UI so it does not
 linger in the workspace's run list.
+
+## Ephemeral environments
+
+`dev` and `staging` exist only while something is being tested there;
+`production` is permanent. Two mechanisms keep the short-lived ones from
+running up a bill:
+
+- **Destroyed on promotion.** Merging `dev → staging` destroys dev, merging
+  `staging → production` destroys staging. The `terraform-destroy.yml`
+  workflow reacts to the merged pull request, checks out the environment's own
+  branch and runs `terraform destroy` as a remote run in HCP Terraform. It is
+  bound to the environment's GitHub environment, so staging's required
+  reviewers gate its teardown, and it shares the apply workflow's concurrency
+  group, so a push that lands during the destroy queues and recreates the
+  environment afterwards. The destroy and the promoted environment's apply run
+  in parallel; they touch different workspaces.
+- **Destroyed after a day without runs.** The dev and staging workspaces have
+  `auto-destroy-activity-duration = 1d`. HCP Terraform queues a destroy run
+  itself once a workspace has been idle for a day, which covers abandoned
+  branches and failed destroy workflows. Raise it in the workspace settings if
+  a test has to survive a weekend.
+- **Manual teardown.** Run the *Terraform destroy* workflow by hand, pick the
+  environment and type its name again to confirm. Production is not offered.
+- **Recreation.** The next push to the branch, or a manual run of *Terraform
+  apply*, rebuilds the environment from scratch. Expect 15 to 20 minutes each
+  way for an EKS cluster.
+
+Rules that keep destroys clean:
+
+- Everything that creates AWS resources must be managed by Terraform in the
+  environment root. Load balancer services, ingress controllers and persistent
+  volumes created from inside the cluster are invisible to Terraform: volumes
+  become orphaned cost and load balancers hold network interfaces that block
+  VPC deletion. CI has no AWS credentials, so nothing can clean those up
+  before the destroy.
+- If a destroy run fails, fix the cause in AWS (usually a leftover load
+  balancer or network interface), then rerun the workflow by hand.
+- Remote runs use the credentials in the `AWS_ACCOUNT_CREDENTIALS` variable
+  set. An expired session makes the destroy fail and the environment keeps
+  billing until someone notices.
+- A saved plan left in the workspace from before the destroy refers to
+  infrastructure that no longer exists; discard it in HCP Terraform.
+- Dev schedules its cluster KMS key for deletion after the minimum 7 days
+  (`kms_key_deletion_window_in_days` on the cluster module) so rebuilt
+  clusters do not accumulate keys pending deletion.
 
 ## Policies
 
@@ -158,7 +214,12 @@ effect once they land on the branch the set follows. See the
    in `main.tf`.
 6. Add `!infra/environments/<name>/<name>.tfvars` to the root `.gitignore`,
    next to the existing exceptions.
-7. Add the branch name to the `branches` lists in both workflows.
+7. Add the branch name to the `branches` lists in `terraform-plan.yml` and
+   `terraform-apply.yml`.
+8. If the environment is ephemeral, set `auto-destroy-activity-duration` on
+   its workspace, pass `kms_key_deletion_window_in_days = 7` to the cluster
+   module, and add its promotion pair and dispatch option to
+   `terraform-destroy.yml`.
 
 ## Testing the modules
 

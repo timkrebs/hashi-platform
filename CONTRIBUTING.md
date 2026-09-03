@@ -43,11 +43,11 @@ locally; runs execute remotely.
 
 ## Branching model
 
-| Branch       | Purpose                                             |
-|--------------|-----------------------------------------------------|
-| `dev`        | Integration branch. All feature work lands here.    |
-| `staging`    | Promotion target from `dev`.                        |
-| `production` | Promotion target from `staging`.                    |
+| Branch | Purpose |
+| --- | --- |
+| `dev` | Integration branch. All feature work lands here. Ephemeral: destroyed when promoted to `staging` or after a day without runs. |
+| `staging` | Promotion target from `dev`. Ephemeral: destroyed when promoted to `production` or after a day without runs. |
+| `production` | Promotion target from `staging`. Permanent. |
 
 1. Branch from `dev`: `git switch -c feat/aws-eks-cluster-spot-groups dev`.
 2. Open a pull request into `dev`. CI runs the static checks and posts a

@@ -36,6 +36,8 @@ module "eks" {
   iam_role_name            = "${var.cluster_name}-cluster"
   iam_role_use_name_prefix = false
 
+  kms_key_deletion_window_in_days = var.kms_key_deletion_window_in_days
+
   cluster_addons = merge(var.cluster_addons, {
     aws-ebs-csi-driver = {
       most_recent              = true

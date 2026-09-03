@@ -26,5 +26,9 @@ module "eks" {
 
   node_groups = var.node_groups
 
+  # Dev is ephemeral and rebuilt often; schedule the old secrets key for
+  # deletion after the minimum window instead of the 30-day default.
+  kms_key_deletion_window_in_days = 7
+
   tags = local.common_tags
 }

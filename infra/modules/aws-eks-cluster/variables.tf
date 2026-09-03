@@ -141,6 +141,17 @@ variable "cluster_addons" {
   }
 }
 
+variable "kms_key_deletion_window_in_days" {
+  description = "Days AWS KMS waits before deleting the cluster's secrets-encryption key once the cluster is destroyed. Use the minimum (7) for short-lived environments so recreated clusters do not pile up keys pending deletion."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.kms_key_deletion_window_in_days >= 7 && var.kms_key_deletion_window_in_days <= 30 && floor(var.kms_key_deletion_window_in_days) == var.kms_key_deletion_window_in_days
+    error_message = "kms_key_deletion_window_in_days must be a whole number between 7 and 30, the range AWS KMS accepts."
+  }
+}
+
 variable "tags" {
   description = "Tags applied to every resource created by this module."
   type        = map(string)
