@@ -294,4 +294,155 @@ resource_changes = {
 		"provider_name":  "registry.terraform.io/hashicorp/time",
 		"type":           "time_sleep",
 	},
+	# Platform layer: Vault prerequisites, all tagged.
+	"module.vault_prerequisites.aws_kms_key.unseal": {
+		"address": "module.vault_prerequisites.aws_kms_key.unseal",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"deletion_window_in_days": 7,
+				"enable_key_rotation":     true,
+				"tags": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+				"tags_all": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+			},
+			"after_unknown": {
+				"arn":      true,
+				"id":       true,
+				"key_id":   true,
+				"tags":     {},
+				"tags_all": {},
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "managed",
+		"module_address": "module.vault_prerequisites",
+		"name":           "unseal",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_kms_key",
+	},
+	# KMS aliases cannot be tagged and must be ignored.
+	"module.vault_prerequisites.aws_kms_alias.unseal": {
+		"address": "module.vault_prerequisites.aws_kms_alias.unseal",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"name": "alias/hashi-platform-dev-vault-unseal",
+			},
+			"after_unknown": {
+				"arn":           true,
+				"id":            true,
+				"target_key_id": true,
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "managed",
+		"module_address": "module.vault_prerequisites",
+		"name":           "unseal",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_kms_alias",
+	},
+	"module.vault_prerequisites.aws_iam_policy.unseal": {
+		"address": "module.vault_prerequisites.aws_iam_policy.unseal",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"name": "hashi-platform-dev-vault-unseal",
+				"tags": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+				"tags_all": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+			},
+			"after_unknown": {
+				"arn":      true,
+				"id":       true,
+				"policy":   true,
+				"tags":     {},
+				"tags_all": {},
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "managed",
+		"module_address": "module.vault_prerequisites",
+		"name":           "unseal",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_iam_policy",
+	},
+	"module.vault_prerequisites.aws_secretsmanager_secret.init": {
+		"address": "module.vault_prerequisites.aws_secretsmanager_secret.init",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"name": "hashi-platform/dev/vault/init",
+				"recovery_window_in_days": 0,
+				"tags": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+				"tags_all": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+			},
+			"after_unknown": {
+				"arn":      true,
+				"id":       true,
+				"tags":     {},
+				"tags_all": {},
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "managed",
+		"module_address": "module.vault_prerequisites",
+		"name":           "init",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_secretsmanager_secret",
+	},
+	# Helm and Kubernetes resources belong to other providers: out of scope.
+	"module.argocd.helm_release.this": {
+		"address": "module.argocd.helm_release.this",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"chart":     "argo-cd",
+				"name":      "argocd",
+				"namespace": "argocd",
+			},
+			"after_unknown": {
+				"id":       true,
+				"metadata": true,
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "managed",
+		"module_address": "module.argocd",
+		"name":           "this",
+		"provider_name":  "registry.terraform.io/hashicorp/helm",
+		"type":           "helm_release",
+	},
 }

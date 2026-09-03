@@ -3,7 +3,7 @@ provider "aws" {
 }
 
 module "network" {
-  source = "../../modules/aws-vpc"
+  source = "../../../modules/aws-vpc"
 
   name       = "${local.cluster_name}-vpc"
   cidr_block = var.vpc_cidr_block
@@ -16,7 +16,7 @@ module "network" {
 }
 
 module "eks" {
-  source = "../../modules/aws-eks-cluster"
+  source = "../../../modules/aws-eks-cluster"
 
   cluster_name    = local.cluster_name
   cluster_version = var.cluster_version

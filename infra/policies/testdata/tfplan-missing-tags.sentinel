@@ -87,4 +87,30 @@ resource_changes = {
 		"provider_name":  "registry.terraform.io/hashicorp/aws",
 		"type":           "aws_subnet",
 	},
+	# Platform layer resource without tags: must be flagged.
+	"module.vault_prerequisites.aws_secretsmanager_secret.init": {
+		"address": "module.vault_prerequisites.aws_secretsmanager_secret.init",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"name": "hashi-platform/dev/vault/init",
+				"recovery_window_in_days": 0,
+				"tags":     null,
+				"tags_all": {},
+			},
+			"after_unknown": {
+				"arn":      true,
+				"id":       true,
+				"tags_all": {},
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "managed",
+		"module_address": "module.vault_prerequisites",
+		"name":           "init",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_secretsmanager_secret",
+	},
 }
