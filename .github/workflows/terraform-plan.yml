@@ -25,8 +25,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Newest 1.16.x, matching the "~> 1.16.0" pin in the environment roots.
-  TERRAFORM_VERSION: "<1.17.0"
+  # Newest 1.15.x, matching the "~> 1.15.0" pin in the environment roots and
+  # the workspace version in HCP Terraform.
+  TERRAFORM_VERSION: "~> 1.15.0"
   TFLINT_VERSION: v0.61.0
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
