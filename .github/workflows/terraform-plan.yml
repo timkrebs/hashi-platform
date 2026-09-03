@@ -1,9 +1,14 @@
 # Pull requests into an environment branch (dev, staging, production):
 #   1. static checks: fmt, tflint, validate, module unit tests
-#   2. a speculative HCP Terraform plan for that environment, posted on the PR
+#   2. Sentinel policy tests
+#   3. a speculative HCP Terraform plan per layer of that environment, posted
+#      on the PR (one comment per layer)
 #
-# The target branch selects the environment: a PR into `staging` plans
-# infra/environments/staging against the hashi-platform-staging workspace.
+# The target branch selects the environment; each environment has two layers:
+#   infra/environments/<env>/cluster   workspace hashi-platform-<env>
+#   infra/environments/<env>/platform  workspace hashi-platform-<env>-platform
+# The platform layer reads the cluster layer's state and talks to the cluster,
+# so it is only planned once the cluster workspace holds resources.
 # Runs execute remotely in HCP Terraform, so the only secret needed here is
 # TF_API_TOKEN (an HCP Terraform team token with plan access to the workspaces).
 name: Terraform plan
@@ -15,6 +20,8 @@ on:
       - "infra/**"
       - ".tflint.hcl"
       - ".github/workflows/terraform-*.yml"
+      - ".github/actions/**"
+      - ".github/scripts/**"
 
 permissions:
   contents: read
@@ -40,8 +47,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       environment: ${{ steps.env.outputs.environment }}
-      directory: ${{ steps.env.outputs.directory }}
-      ready: ${{ steps.env.outputs.ready }}
+      cluster_ready: ${{ steps.env.outputs.cluster_ready }}
+      platform_ready: ${{ steps.env.outputs.platform_ready }}
+      cluster_has_state: ${{ steps.cluster_state.outputs.has_state }}
     steps:
       - uses: actions/checkout@v7
 
@@ -49,18 +57,23 @@ jobs:
         env:
           TARGET_BRANCH: ${{ github.base_ref }}
         run: |
-          directory="infra/environments/${TARGET_BRANCH}"
-          if [ -f "${directory}/main.tf" ]; then
-            ready=true
-          else
-            ready=false
-            echo "::notice::${directory}/main.tf does not exist yet; validate and plan are skipped for ${TARGET_BRANCH}."
-          fi
-          {
-            echo "environment=${TARGET_BRANCH}"
-            echo "directory=${directory}"
-            echo "ready=${ready}"
-          } >> "$GITHUB_OUTPUT"
+          echo "environment=${TARGET_BRANCH}" >> "$GITHUB_OUTPUT"
+          for layer in cluster platform; do
+            directory="infra/environments/${TARGET_BRANCH}/${layer}"
+            if [ -f "${directory}/main.tf" ]; then
+              echo "${layer}_ready=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "${layer}_ready=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::${directory}/main.tf does not exist; the ${layer} layer is skipped for ${TARGET_BRANCH}."
+            fi
+          done
+
+      # The platform layer can only be planned against a cluster that exists.
+      - id: cluster_state
+        uses: ./.github/actions/hcp-workspace-state
+        with:
+          workspace: hashi-platform-${{ github.base_ref }}
+          token: ${{ secrets.TF_API_TOKEN }}
 
   checks:
     name: Static checks
@@ -82,21 +95,26 @@ jobs:
           tflint_version: ${{ env.TFLINT_VERSION }}
           github_token: ${{ github.token }}
 
-      # Lints the modules and the target environment only, so an environment
-      # directory that is still being built out does not block other branches.
+      # Lints the modules and the target environment's layers only, so an
+      # environment directory that is still being built out does not block
+      # other branches.
       - name: tflint
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          DIRECTORY: ${{ needs.resolve.outputs.directory }}
-          READY: ${{ needs.resolve.outputs.ready }}
+          ENVIRONMENT: ${{ needs.resolve.outputs.environment }}
+          CLUSTER_READY: ${{ needs.resolve.outputs.cluster_ready }}
+          PLATFORM_READY: ${{ needs.resolve.outputs.platform_ready }}
         run: |
           tflint --init --config "$PWD/.tflint.hcl"
           for dir in infra/modules/*/; do
             tflint --chdir="${dir}" --config "$PWD/.tflint.hcl" --format compact
           done
-          if [ "${READY}" = "true" ]; then
-            tflint --chdir="${DIRECTORY}" --config "$PWD/.tflint.hcl" --format compact
-          fi
+          for layer in cluster platform; do
+            ready_var="$(echo "${layer}" | tr '[:lower:]' '[:upper:]')_READY"
+            if [ "${!ready_var}" = "true" ]; then
+              tflint --chdir="infra/environments/${ENVIRONMENT}/${layer}" --config "$PWD/.tflint.hcl" --format compact
+            fi
+          done
 
       - name: Validate modules and run unit tests
         run: |
@@ -108,13 +126,22 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: Validate ${{ needs.resolve.outputs.environment }} root
-        if: needs.resolve.outputs.ready == 'true'
+      - name: Validate ${{ needs.resolve.outputs.environment }} layers
         env:
-          DIRECTORY: ${{ needs.resolve.outputs.directory }}
+          ENVIRONMENT: ${{ needs.resolve.outputs.environment }}
+          CLUSTER_READY: ${{ needs.resolve.outputs.cluster_ready }}
+          PLATFORM_READY: ${{ needs.resolve.outputs.platform_ready }}
         run: |
-          terraform -chdir="${DIRECTORY}" init -backend=false
-          terraform -chdir="${DIRECTORY}" validate
+          for layer in cluster platform; do
+            ready_var="$(echo "${layer}" | tr '[:lower:]' '[:upper:]')_READY"
+            if [ "${!ready_var}" = "true" ]; then
+              directory="infra/environments/${ENVIRONMENT}/${layer}"
+              echo "::group::${directory}"
+              terraform -chdir="${directory}" init -backend=false
+              terraform -chdir="${directory}" validate
+              echo "::endgroup::"
+            fi
+          done
 
   # The Sentinel policies in infra/policies gate every run in HCP Terraform, so
   # their own tests run here before a plan is requested.
@@ -143,12 +170,9 @@ jobs:
     name: Plan ${{ needs.resolve.outputs.environment }}
     runs-on: ubuntu-latest
     needs: [resolve, checks, policies]
-    if: needs.resolve.outputs.ready == 'true'
+    if: needs.resolve.outputs.cluster_ready == 'true' || needs.resolve.outputs.platform_ready == 'true'
     env:
       ENVIRONMENT: ${{ needs.resolve.outputs.environment }}
-    defaults:
-      run:
-        working-directory: ${{ needs.resolve.outputs.directory }}
     steps:
       - uses: actions/checkout@v7
 
@@ -158,78 +182,70 @@ jobs:
           terraform_wrapper: false
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
-      - name: terraform init
-        run: terraform init
-
-      # Without -out this is a speculative plan: HCP Terraform records it but it
-      # can never be applied.
-      - name: Speculative plan
-        id: plan
-        run: terraform plan -no-color -var-file="${ENVIRONMENT}.tfvars" 2>&1 | tee plan.txt
-
-      - name: Build plan report
-        if: always() && steps.plan.outcome != 'skipped'
-        env:
-          PLAN_OUTCOME: ${{ steps.plan.outcome }}
-          MARKER: "<!-- terraform-plan:${{ needs.resolve.outputs.environment }} -->"
+      # Without -out these are speculative plans: HCP Terraform records them
+      # but they can never be applied.
+      - name: Plan cluster layer
+        id: plan_cluster
+        if: needs.resolve.outputs.cluster_ready == 'true'
+        working-directory: infra/environments/${{ needs.resolve.outputs.environment }}/cluster
         run: |
-          status_line=$(grep -E '^(Plan:|No changes\.|Error:)' plan.txt | head -n 1 || true)
-          run_url=$(grep -Eo 'https://app\.terraform\.io/app/[^[:space:]]+' plan.txt | head -n 1 || true)
-          if [ "${PLAN_OUTCOME}" = "success" ]; then icon="✅"; else icon="❌"; fi
-          : "${status_line:=Plan ${PLAN_OUTCOME}; see output below}"
+          terraform init
+          terraform plan -no-color -var-file="${ENVIRONMENT}.tfvars" 2>&1 | tee plan.txt
 
-          # Keep the comment under GitHub's 65,536 character limit.
-          if [ "$(wc -c < plan.txt)" -gt 60000 ]; then
-            head -c 60000 plan.txt > plan-trimmed.txt
-            printf '\n\n... output truncated; open the HCP Terraform run for the full plan.\n' >> plan-trimmed.txt
-          else
-            cp plan.txt plan-trimmed.txt
-          fi
+      - name: Cluster plan report
+        if: always() && steps.plan_cluster.outcome != 'skipped'
+        env:
+          LAYER: cluster
+          PLAN_OUTCOME: ${{ steps.plan_cluster.outcome }}
+        working-directory: infra/environments/${{ needs.resolve.outputs.environment }}/cluster
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/plan-report.sh" plan.txt "${GITHUB_WORKSPACE}/plan-report-cluster.md"
 
-          {
-            echo "${MARKER}"
-            echo "### ${icon} Terraform plan for \`${ENVIRONMENT}\`"
-            echo
-            echo "**${status_line}**"
-            if [ -n "${run_url}" ]; then
-              echo
-              echo "HCP Terraform run: ${run_url}"
-            fi
-            echo
-            echo "<details><summary>Plan output</summary>"
-            echo
-            echo '```text'
-            cat plan-trimmed.txt
-            echo '```'
-            echo
-            echo "</details>"
-            echo
-            echo "_Commit ${GITHUB_SHA} · [workflow run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})_"
-          } > plan-report.md
+      - name: Plan platform layer
+        id: plan_platform
+        if: always() && needs.resolve.outputs.platform_ready == 'true' && needs.resolve.outputs.cluster_has_state == 'true' && steps.plan_cluster.outcome != 'failure'
+        working-directory: infra/environments/${{ needs.resolve.outputs.environment }}/platform
+        run: |
+          terraform init
+          terraform plan -no-color -var-file="${ENVIRONMENT}.tfvars" 2>&1 | tee plan.txt
 
-          cat plan-report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Platform plan report
+        if: always() && steps.plan_platform.outcome != 'skipped'
+        env:
+          LAYER: platform
+          PLAN_OUTCOME: ${{ steps.plan_platform.outcome }}
+        working-directory: infra/environments/${{ needs.resolve.outputs.environment }}/platform
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/plan-report.sh" plan.txt "${GITHUB_WORKSPACE}/plan-report-platform.md"
 
+      - name: Note skipped platform plan
+        if: needs.resolve.outputs.platform_ready == 'true' && needs.resolve.outputs.cluster_has_state != 'true'
+        run: |
+          echo "::notice::Platform layer not planned: workspace hashi-platform-${ENVIRONMENT} holds no resources yet. Apply the cluster layer first."
+          echo "### ⏭️ Platform plan for \`${ENVIRONMENT}\` skipped: the cluster workspace holds no resources yet." >> "$GITHUB_STEP_SUMMARY"
+
+      # One comment per layer, updated in place on every push.
       - name: Comment on pull request
-        if: always() && steps.plan.outcome != 'skipped'
+        if: always()
         uses: actions/github-script@v9
         env:
-          REPORT_PATH: ${{ needs.resolve.outputs.directory }}/plan-report.md
-          MARKER: "<!-- terraform-plan:${{ needs.resolve.outputs.environment }} -->"
+          ENVIRONMENT: ${{ needs.resolve.outputs.environment }}
         with:
           script: |
             const fs = require('fs');
-            const body = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
-            const marker = process.env.MARKER;
             const { owner, repo } = context.repo;
             const issue_number = context.issue.number;
-
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner, repo, issue_number, per_page: 100,
             });
-            const existing = comments.find((c) => c.body && c.body.includes(marker));
 
-            if (existing) {
-              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
-            } else {
-              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            for (const layer of ['cluster', 'platform']) {
+              const path = `plan-report-${layer}.md`;
+              if (!fs.existsSync(path)) continue;
+              const body = fs.readFileSync(path, 'utf8');
+              const marker = `<!-- terraform-plan:${process.env.ENVIRONMENT}:${layer} -->`;
+              const existing = comments.find((c) => c.body && c.body.includes(marker));
+              if (existing) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+              } else {
+                await github.rest.issues.createComment({ owner, repo, issue_number, body });
+              }
             }

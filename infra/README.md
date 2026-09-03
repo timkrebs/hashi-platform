@@ -126,52 +126,57 @@ Environment identity (project, environment name, cluster name, common tags)
 is fixed in each layer's `locals.tf`. Tunables such as the region, VPC CIDR,
 node groups and the Vault allow-list are variables with sensible defaults,
 overridden in `<environment>.tfvars`. Those files are committed on purpose
-because CI plans with them; never put secrets in them. The root `.gitignore`
-still lists the exceptions at the old `infra/environments/<env>/<env>.tfvars`
-paths; the layered files were added with `git add -f` and stay tracked, but
-the exceptions should be moved to `!infra/environments/<env>/*/<env>.tfvars`.
+because CI plans with them (the root `.gitignore` lists them as exceptions to
+the general `*.tfvars` rule); never put secrets in them.
 
 After the first apply, `terraform output configure_kubectl` prints the command
 that writes a kubeconfig entry.
 
 ## CI/CD
 
-> **Layer migration pending.** The workflows, the Makefile and the root
-> `.gitignore` were written for one root per environment at
-> `infra/environments/<env>`. They have not been updated for the `cluster/`
-> and `platform/` layout yet, so until that happens CI finds no `main.tf` at
-> the old path and skips plan, apply and destroy. The required changes are
-> listed under [Required changes outside infra/](#required-changes-outside-infra).
-
-Two workflows in `.github/workflows` drive the pipeline. Both derive the
-environment from the branch and skip plan and apply until the environment's
-`main.tf` exists.
+Three workflows in `.github/workflows` drive the pipeline. They derive the
+environment from the branch and the layers from which
+`infra/environments/<env>/<layer>/main.tf` files exist; a missing layer is
+skipped with a notice. Whether the platform layer can run is decided by
+asking HCP Terraform (through the composite action
+`.github/actions/hcp-workspace-state`) whether the cluster workspace holds
+resources.
 
 **`terraform-plan.yml`** runs on pull requests into `dev`, `staging` or
 `production`:
 
-1. `terraform fmt -check`, `tflint --recursive` (config in the repo root),
-   `terraform validate` and `terraform test` for both modules, and
-   `terraform validate` for the target environment root.
-2. A speculative plan in HCP Terraform for the target environment. The result
-   is posted as a comment on the pull request (one comment per environment,
-   updated on every push) and in the job summary, with a link to the HCP run.
+1. `terraform fmt -check`, `tflint`, `terraform validate` and
+   `terraform test` for every module, and `terraform validate` for each
+   layer of the target environment; Sentinel policy tests.
+2. A speculative plan in HCP Terraform per layer. The platform layer is only
+   planned once the cluster workspace holds resources. Each layer's result is
+   posted as its own comment on the pull request (updated on every push) and
+   in the job summary, with a link to the HCP run.
 
 **`terraform-apply.yml`** runs on pushes to those branches (so, on merge) and
 on manual dispatch:
 
-1. `terraform plan -out=tfplan`, which creates an applyable run in HCP
-   Terraform. The job ends here when the plan has no changes.
-2. `terraform apply tfplan` in a job bound to the GitHub environment of the
-   same name, so required reviewers and wait timers configured there gate
-   the apply. Exactly the saved plan is applied, not a fresh one.
+1. `terraform plan -out=tfplan` for the cluster layer, which creates an
+   applyable run in HCP Terraform.
+2. One job bound to the GitHub environment of the same name, so required
+   reviewers and wait timers configured there gate everything below: it
+   applies exactly the saved cluster plan (skipped when that plan had no
+   changes), then plans and applies the platform layer back to back. The
+   platform layer never uses a saved plan because its Kubernetes token is
+   only valid for about 15 minutes and would expire while a reviewer waits.
+   The job runs whenever the cluster plan has changes or a platform layer
+   exists, so platform-only changes still deploy.
 
 **`terraform-destroy.yml`** runs when a promotion pull request is merged
 (`dev → staging` destroys dev, `staging → production` destroys staging) and
 on manual dispatch for dev or staging. It checks out the environment's own
-branch and runs `terraform destroy` as a remote run, bound to that
-environment's GitHub environment and sharing the apply workflow's concurrency
-group. Production is never a target. Details under
+branch and destroys the platform layer first, then the cluster layer, as
+remote runs bound to that environment's GitHub environment and sharing the
+apply workflow's concurrency group. If the platform destroy fails the job
+stops and the cluster stays; if the cluster workspace holds no resources the
+platform destroy is skipped with a warning. The dispatch form offers
+`layer = platform` to rehearse a platform teardown alone. Production is
+never a target. Details under
 [Ephemeral environments](#ephemeral-environments).
 
 One-time setup:
@@ -205,28 +210,24 @@ If a reviewer rejects an apply, the HCP Terraform run stays in
 *planned and saved*; discard it from the HCP Terraform UI so it does not
 linger in the workspace's run list.
 
-### Required changes outside infra/
+### Rolling the layered layout to a branch
 
-The layered layout is complete inside `infra/`; these pieces elsewhere still
-have to follow before it deploys through CI:
+The `cluster/` and `platform/` layout reaches each environment branch by
+promotion. Because the HCP workspace's working directory must match the
+branch content, switch it at the same time:
 
-- `.github/workflows/terraform-plan.yml`, `terraform-apply.yml`,
-  `terraform-destroy.yml`: resolve `infra/environments/<env>/<layer>` per
-  layer; apply `cluster` (saved plan, environment approval) and then
-  `platform` (fresh plan and apply in the same approved job, because the
-  Kubernetes token in a saved plan expires after 15 minutes); destroy in
-  reverse order and stop on the first failure; skip the platform layer while
-  the cluster workspace has no state (HCP API `resource-count`); post one
-  plan comment per layer.
-- `Makefile`: `ENV_DIRS` glob `infra/environments/*/*/main.tf`, a `LAYER`
-  variable for `make plan`.
-- `.gitignore`: tfvars exceptions `!infra/environments/<env>/*/<env>.tfvars`.
-- `.github/dependabot.yml`: Terraform directories `/infra/environments/*/*`.
-- HCP Terraform: working directories, platform workspaces, remote state
-  sharing and auto-destroy durations as listed under one-time setup.
-- The `gitops/` tree Argo CD syncs (`gitops/clusters/<env>`, the Vault
-  application and its values) does not exist yet; the root Application will
-  report a missing path until it lands.
+1. Immediately before merging the promotion pull request into the branch,
+   set the cluster workspace's working directory to
+   `infra/environments/<env>/cluster`. Do not push to that branch in
+   between. (Done for `dev`; pending for `staging` and `production`.)
+2. The `-platform` workspaces already exist with their working directories,
+   remote state sharing from the cluster workspace, and auto-destroy `1d` on
+   dev and staging.
+3. Merge. The cluster layer plans with no changes; the platform layer then
+   installs Argo CD and the add-ons.
+4. The `gitops/` tree Argo CD syncs (`gitops/clusters/<env>`, the Vault
+   application and its values) does not exist yet; the root Application
+   reports a missing path until it lands, which is harmless.
 
 ## Ephemeral environments
 

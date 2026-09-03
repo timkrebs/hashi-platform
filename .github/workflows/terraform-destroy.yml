@@ -1,4 +1,5 @@
-# Tears down an ephemeral environment (dev or staging) in HCP Terraform.
+# Tears down an ephemeral environment (dev or staging) in HCP Terraform,
+# platform layer first, then the cluster layer.
 #
 # Runs automatically when a promotion pull request is merged:
 #   dev     -> staging      destroys dev
@@ -11,8 +12,12 @@
 # workflow's concurrency group, so a push that lands during the destroy queues
 # behind it and recreates the environment afterwards.
 #
-# HCP Terraform additionally destroys dev and staging after one day without
-# runs (workspace setting auto-destroy-activity-duration).
+# Order matters: the platform layer removes Argo CD's workloads and the AWS
+# objects they created while the load balancer controller still runs. If the
+# platform destroy fails, the job stops and the cluster is left in place.
+#
+# HCP Terraform additionally destroys idle dev and staging workspaces
+# (auto-destroy-activity-duration: platform 1d, cluster 2d).
 name: Terraform destroy
 
 on:
@@ -30,6 +35,12 @@ on:
         description: Type the environment name again to confirm
         type: string
         required: true
+      layer:
+        description: Which layers to destroy
+        type: choice
+        required: false
+        default: all
+        options: [all, platform]
 
 permissions:
   contents: read
@@ -97,7 +108,9 @@ jobs:
       cancel-in-progress: false
     env:
       ENVIRONMENT: ${{ needs.resolve.outputs.environment }}
-      DIRECTORY: infra/environments/${{ needs.resolve.outputs.environment }}
+      CLUSTER_DIR: infra/environments/${{ needs.resolve.outputs.environment }}/cluster
+      PLATFORM_DIR: infra/environments/${{ needs.resolve.outputs.environment }}/platform
+      LAYER_SELECTION: ${{ inputs.layer || 'all' }}
     steps:
       # Destroy with the configuration that was applied: the environment's own branch.
       - uses: actions/checkout@v7
@@ -107,50 +120,75 @@ jobs:
       - id: config
         name: Check configuration
         run: |
-          if [ -f "${DIRECTORY}/main.tf" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::${DIRECTORY}/main.tf does not exist on branch ${ENVIRONMENT}; nothing to destroy."
-          fi
+          for layer in cluster platform; do
+            directory="infra/environments/${ENVIRONMENT}/${layer}"
+            if [ -f "${directory}/main.tf" ]; then
+              echo "${layer}_ready=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "${layer}_ready=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::${directory}/main.tf does not exist on branch ${ENVIRONMENT}; the ${layer} layer is skipped."
+            fi
+          done
+
+      # The platform layer talks to the cluster while it is destroyed; without
+      # a cluster its Kubernetes resources cannot be removed cleanly.
+      - id: cluster_state
+        uses: ./.github/actions/hcp-workspace-state
+        with:
+          workspace: hashi-platform-${{ needs.resolve.outputs.environment }}
+          token: ${{ secrets.TF_API_TOKEN }}
 
       - uses: hashicorp/setup-terraform@v4
-        if: steps.config.outputs.ready == 'true'
+        if: steps.config.outputs.cluster_ready == 'true' || steps.config.outputs.platform_ready == 'true'
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
-      - name: terraform init
-        if: steps.config.outputs.ready == 'true'
-        working-directory: ${{ env.DIRECTORY }}
-        run: terraform init
+      # ---- platform layer first ------------------------------------------------
+      - name: Destroy platform layer
+        if: steps.config.outputs.platform_ready == 'true' && steps.cluster_state.outputs.has_state == 'true'
+        working-directory: ${{ env.PLATFORM_DIR }}
+        run: |
+          terraform init
+          terraform destroy -auto-approve -no-color -var-file="${ENVIRONMENT}.tfvars" 2>&1 | tee "${GITHUB_WORKSPACE}/destroy-platform.txt"
 
-      - name: terraform destroy
-        if: steps.config.outputs.ready == 'true'
-        working-directory: ${{ env.DIRECTORY }}
-        run: terraform destroy -auto-approve -no-color -var-file="${ENVIRONMENT}.tfvars" 2>&1 | tee destroy.txt
+      - name: Note skipped platform destroy
+        if: steps.config.outputs.platform_ready == 'true' && steps.cluster_state.outputs.has_state != 'true'
+        run: |
+          echo "::warning::Platform layer not destroyed: workspace hashi-platform-${ENVIRONMENT} holds no resources, so there is no cluster to talk to. If hashi-platform-${ENVIRONMENT}-platform still holds state, remove its Kubernetes and Helm resources with 'terraform state rm' and destroy the remaining AWS resources by hand."
+
+      # ---- then the cluster layer (only if everything above succeeded) ---------
+      - name: Destroy cluster layer
+        if: steps.config.outputs.cluster_ready == 'true' && env.LAYER_SELECTION == 'all'
+        working-directory: ${{ env.CLUSTER_DIR }}
+        run: |
+          terraform init
+          terraform destroy -auto-approve -no-color -var-file="${ENVIRONMENT}.tfvars" 2>&1 | tee "${GITHUB_WORKSPACE}/destroy-cluster.txt"
 
       - name: Destroy summary
-        if: always() && steps.config.outputs.ready == 'true'
-        working-directory: ${{ env.DIRECTORY }}
+        if: always()
         run: |
-          status_line=$(grep -E '^(Destroy complete!|Apply complete!|No changes\.|Error:)' destroy.txt | head -n 1 || true)
-          run_url=$(grep -Eo 'https://app\.terraform\.io/app/[^[:space:]]+' destroy.txt | head -n 1 || true)
-          {
-            echo "### Terraform destroy for \`${ENVIRONMENT}\`"
-            echo
-            echo "**${status_line:-See output below}**"
-            if [ -n "${run_url}" ]; then
+          for layer in platform cluster; do
+            file="destroy-${layer}.txt"
+            [ -f "${file}" ] || continue
+            status_line=$(grep -E '^(Destroy complete!|Apply complete!|No changes\.|Error:)' "${file}" | head -n 1 || true)
+            run_url=$(grep -Eo 'https://app\.terraform\.io/app/[^[:space:]]+' "${file}" | head -n 1 || true)
+            {
+              echo "### Terraform destroy for \`${ENVIRONMENT}\` / \`${layer}\`"
               echo
-              echo "HCP Terraform run: ${run_url}"
-            fi
-            echo
-            echo "<details><summary>Destroy output</summary>"
-            echo
-            echo '```text'
-            cat destroy.txt
-            echo '```'
-            echo
-            echo "</details>"
-          } >> "$GITHUB_STEP_SUMMARY"
+              echo "**${status_line:-See output below}**"
+              if [ -n "${run_url}" ]; then
+                echo
+                echo "HCP Terraform run: ${run_url}"
+              fi
+              echo
+              echo "<details><summary>Destroy output</summary>"
+              echo
+              echo '```text'
+              cat "${file}"
+              echo '```'
+              echo
+              echo "</details>"
+            } >> "$GITHUB_STEP_SUMMARY"
+          done

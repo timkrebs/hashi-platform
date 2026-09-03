@@ -1,0 +1,67 @@
+name: HCP Terraform workspace state
+description: >-
+  Reports whether an HCP Terraform workspace exists and holds resources, by
+  reading its resource count from the HCP Terraform API. Used to decide
+  whether a layer that depends on another workspace's state can be planned.
+
+inputs:
+  workspace:
+    description: Workspace name
+    required: true
+  token:
+    description: HCP Terraform API token. When empty (for example on pull requests from forks) the workspace is treated as empty.
+    required: false
+    default: ""
+  organization:
+    description: HCP Terraform organization
+    required: false
+    default: tim-krebs-org
+
+outputs:
+  exists:
+    description: "true when the workspace exists and is readable"
+    value: ${{ steps.query.outputs.exists }}
+  resource_count:
+    description: Number of resources in the workspace's current state
+    value: ${{ steps.query.outputs.resource_count }}
+  has_state:
+    description: "true when the workspace holds at least one resource"
+    value: ${{ steps.query.outputs.has_state }}
+
+runs:
+  using: composite
+  steps:
+    - id: query
+      shell: bash
+      env:
+        ORGANIZATION: ${{ inputs.organization }}
+        WORKSPACE: ${{ inputs.workspace }}
+        TOKEN: ${{ inputs.token }}
+      run: |
+        exists=false
+        resource_count=0
+        has_state=false
+
+        if [ -z "${TOKEN}" ]; then
+          echo "::notice::No HCP Terraform token available; treating workspace ${WORKSPACE} as empty."
+        else
+          if response=$(curl -sS --fail \
+              -H "Authorization: Bearer ${TOKEN}" \
+              -H "Content-Type: application/vnd.api+json" \
+              "https://app.terraform.io/api/v2/organizations/${ORGANIZATION}/workspaces/${WORKSPACE}" 2>/dev/null); then
+            exists=true
+            resource_count=$(printf '%s' "${response}" | jq -r '.data.attributes["resource-count"] // 0')
+            if [ "${resource_count}" -gt 0 ]; then
+              has_state=true
+            fi
+          else
+            echo "::notice::Workspace ${WORKSPACE} not found or not readable; treating it as empty."
+          fi
+        fi
+
+        echo "Workspace ${WORKSPACE}: exists=${exists} resources=${resource_count}"
+        {
+          echo "exists=${exists}"
+          echo "resource_count=${resource_count}"
+          echo "has_state=${has_state}"
+        } >> "$GITHUB_OUTPUT"

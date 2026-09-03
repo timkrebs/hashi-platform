@@ -50,9 +50,9 @@ flowchart LR
 │   │   └── aws-eks-cluster/ # cluster module (+ unit tests)
 │   ├── policies/            # Sentinel policy set for HCP Terraform (+ tests)
 │   └── environments/
-│       ├── dev/             # root module → workspace hashi-platform-dev
-│       ├── staging/         # root module → workspace hashi-platform-staging
-│       └── production/      # root module → workspace hashi-platform-production
+│       └── <env>/           # dev, staging, production
+│           ├── cluster/     # network + EKS       → workspace hashi-platform-<env>
+│           └── platform/    # add-ons + Argo CD   → workspace hashi-platform-<env>-platform
 ├── .tflint.hcl              # shared lint rules
 ├── .pre-commit-config.yaml  # local checks mirroring CI
 └── Makefile                 # fmt, lint, validate, test, plan
@@ -89,11 +89,11 @@ needs no AWS credentials.
 
 ## Branches and environments
 
-| Branch       | Root module                     | HCP Terraform workspace     |
-|--------------|---------------------------------|-----------------------------|
-| `dev`        | `infra/environments/dev`        | `hashi-platform-dev`        |
-| `staging`    | `infra/environments/staging`    | `hashi-platform-staging`    |
-| `production` | `infra/environments/production` | `hashi-platform-production` |
+| Branch | Roots under `infra/environments/<env>/` | HCP Terraform workspaces |
+| --- | --- | --- |
+| `dev` | `cluster/`, `platform/` | `hashi-platform-dev`, `hashi-platform-dev-platform` |
+| `staging` | `cluster/`, `platform/` | `hashi-platform-staging`, `hashi-platform-staging-platform` |
+| `production` | `cluster/`, `platform/` | `hashi-platform-production`, `hashi-platform-production-platform` |
 
 Feature work goes into `dev` by pull request; promotion is a pull request from
 `dev` to `staging` and from `staging` to `production`. Merging applies, and

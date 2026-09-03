@@ -29,6 +29,15 @@ for the modules once they are tagged.
   without runs.
 - `aws-eks-cluster` input `kms_key_deletion_window_in_days` (default 30);
   dev uses the 7-day minimum.
+- Platform layer per environment (`infra/environments/<env>/platform`,
+  workspace `hashi-platform-<env>-platform`): AWS Load Balancer Controller,
+  cert-manager, Vault AWS prerequisites (KMS unseal key, IRSA roles, init
+  secret), Argo CD with the in-cluster secret bridge, and the root
+  Application syncing `gitops/clusters/<env>`. New modules with unit tests:
+  `aws-load-balancer-controller`, `cert-manager`, `argocd`,
+  `argocd-root-app`, `vault-aws-prerequisites`, `boundary` (placeholder).
+- Composite action `hcp-workspace-state` and a shared plan-report script for
+  the workflows.
 - Repository scaffolding: shared tflint configuration, pre-commit hooks,
   Makefile, editorconfig, gitattributes, issue and pull request templates,
   CODEOWNERS, Dependabot for actions and Terraform.
@@ -42,6 +51,13 @@ for the modules once they are tagged.
   not published for Kubernetes 1.33 and later.
 - IAM roles created for the cluster and node groups use deterministic names
   instead of random suffixes.
+- Environment roots moved to `infra/environments/<env>/cluster`; the
+  workflows, Makefile, `.gitignore` and Dependabot are layer-aware. The apply
+  workflow applies the saved cluster plan and then plans and applies the
+  platform layer inside the same approved job; the destroy workflow tears
+  down platform before cluster and stops on failure.
+- Staging VPC CIDR changed to `10.1.0.0/16`; cluster workspaces of ephemeral
+  environments auto-destroy after 2 days, platform workspaces after 1 day.
 
 ### Removed
 
