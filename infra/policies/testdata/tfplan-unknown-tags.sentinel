@@ -1,0 +1,28 @@
+# A resource whose whole tag map is only known after apply. The policy cannot
+# prove it will be tagged, so it must fail closed.
+terraform_version = "1.15.9"
+
+resource_changes = {
+	"aws_vpc.tags_from_unknown_map": {
+		"address": "aws_vpc.tags_from_unknown_map",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"cidr_block": "10.2.0.0/16",
+			},
+			"after_unknown": {
+				"id":       true,
+				"tags":     true,
+				"tags_all": true,
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "managed",
+		"module_address": "",
+		"name":           "tags_from_unknown_map",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_vpc",
+	},
+}

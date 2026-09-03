@@ -1,0 +1,297 @@
+# A trimmed, sanitised tfplan/v2 mock modelled on the dev environment plan:
+# every taggable resource carries the mandatory tags and all compute is
+# t3.medium or smaller. Also includes resources the policies must ignore.
+terraform_version = "1.15.9"
+
+resource_changes = {
+	"module.network.module.vpc.aws_vpc.this[0]": {
+		"address": "module.network.module.vpc.aws_vpc.this[0]",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"cidr_block": "10.0.0.0/16",
+				"tags": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Name":        "hashi-platform-dev-cluster-vpc",
+					"Project":     "hashi-platform",
+				},
+				"tags_all": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Name":        "hashi-platform-dev-cluster-vpc",
+					"Project":     "hashi-platform",
+				},
+			},
+			"after_unknown": {
+				"arn":      true,
+				"id":       true,
+				"tags":     {},
+				"tags_all": {},
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          0,
+		"mode":           "managed",
+		"module_address": "module.network.module.vpc",
+		"name":           "this",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_vpc",
+	},
+	# Tagged only through provider default_tags: `tags` is null, `tags_all` has them.
+	"aws_cloudwatch_log_group.default_tagged": {
+		"address": "aws_cloudwatch_log_group.default_tagged",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"name": "/platform/example",
+				"tags": null,
+				"tags_all": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+			},
+			"after_unknown": {
+				"arn":      true,
+				"id":       true,
+				"tags_all": {},
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "managed",
+		"module_address": "",
+		"name":           "default_tagged",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_cloudwatch_log_group",
+	},
+	# One mandatory tag has a value known only after apply; the key is still set.
+	"aws_security_group.partially_unknown": {
+		"address": "aws_security_group.partially_unknown",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"name": "node",
+				"tags": {
+					"Environment": "Dev",
+					"Project":     "hashi-platform",
+				},
+				"tags_all": {
+					"Environment": "Dev",
+					"Project":     "hashi-platform",
+				},
+			},
+			"after_unknown": {
+				"id": true,
+				"tags": {
+					"ManagedBy": true,
+				},
+				"tags_all": {
+					"ManagedBy": true,
+				},
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "managed",
+		"module_address": "",
+		"name":           "partially_unknown",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_security_group",
+	},
+	"module.eks.module.eks.module.eks_managed_node_group[\"default\"].aws_eks_node_group.this[0]": {
+		"address": "module.eks.module.eks.module.eks_managed_node_group[\"default\"].aws_eks_node_group.this[0]",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"ami_type":       "AL2023_x86_64_STANDARD",
+				"capacity_type":  "ON_DEMAND",
+				"instance_types": ["t3.medium"],
+				"tags": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Name":        "default",
+					"Project":     "hashi-platform",
+				},
+				"tags_all": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Name":        "default",
+					"Project":     "hashi-platform",
+				},
+			},
+			"after_unknown": {
+				"arn":            true,
+				"id":             true,
+				"instance_types": [false],
+				"tags":           {},
+				"tags_all":       {},
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          0,
+		"mode":           "managed",
+		"module_address": "module.eks.module.eks.module.eks_managed_node_group[\"default\"]",
+		"name":           "this",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_eks_node_group",
+	},
+	# Launch template without an instance type (the node group sets it).
+	"module.eks.module.eks.module.eks_managed_node_group[\"default\"].aws_launch_template.this[0]": {
+		"address": "module.eks.module.eks.module.eks_managed_node_group[\"default\"].aws_launch_template.this[0]",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"instance_type": null,
+				"tags": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+				"tags_all": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+			},
+			"after_unknown": {
+				"arn":      true,
+				"id":       true,
+				"tags":     {},
+				"tags_all": {},
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          0,
+		"mode":           "managed",
+		"module_address": "module.eks.module.eks.module.eks_managed_node_group[\"default\"]",
+		"name":           "this",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_launch_template",
+	},
+	"aws_autoscaling_group.small_overrides": {
+		"address": "aws_autoscaling_group.small_overrides",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"mixed_instances_policy": [
+					{
+						"launch_template": [
+							{
+								"override": [
+									{"instance_type": "t3.medium"},
+									{"instance_type": "t3a.medium"},
+									{"instance_type": "t4g.small"},
+								],
+							},
+						],
+					},
+				],
+				"tag": [],
+			},
+			"after_unknown": {
+				"arn": true,
+				"id":  true,
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "managed",
+		"module_address": "",
+		"name":           "small_overrides",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_autoscaling_group",
+	},
+	# No `tags` attribute at all: must be ignored by the tag policy.
+	"module.network.module.vpc.aws_route_table_association.private[0]": {
+		"address": "module.network.module.vpc.aws_route_table_association.private[0]",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"gateway_id": null,
+			},
+			"after_unknown": {
+				"id":             true,
+				"route_table_id": true,
+				"subnet_id":      true,
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          0,
+		"mode":           "managed",
+		"module_address": "module.network.module.vpc",
+		"name":           "private",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_route_table_association",
+	},
+	# Being destroyed: untagged and oversized, but deletes are out of scope.
+	"aws_instance.legacy": {
+		"address": "aws_instance.legacy",
+		"change": {
+			"actions":       ["delete"],
+			"after":         null,
+			"after_unknown": {},
+			"before": {
+				"instance_type": "m5.4xlarge",
+				"tags":          {},
+				"tags_all":      {},
+			},
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "managed",
+		"module_address": "",
+		"name":           "legacy",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_instance",
+	},
+	# Data source: never checked.
+	"module.network.data.aws_availability_zones.available": {
+		"address": "module.network.data.aws_availability_zones.available",
+		"change": {
+			"actions": ["read"],
+			"after": {
+				"names": ["us-east-1a", "us-east-1b", "us-east-1c"],
+				"tags":  null,
+			},
+			"after_unknown": {},
+			"before":        null,
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "data",
+		"module_address": "module.network",
+		"name":           "available",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_availability_zones",
+	},
+	# Different provider: never checked.
+	"module.eks.module.eks.time_sleep.this[0]": {
+		"address": "module.eks.module.eks.time_sleep.this[0]",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"create_duration": "30s",
+			},
+			"after_unknown": {
+				"id": true,
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          0,
+		"mode":           "managed",
+		"module_address": "module.eks.module.eks",
+		"name":           "this",
+		"provider_name":  "registry.terraform.io/hashicorp/time",
+		"type":           "time_sleep",
+	},
+}

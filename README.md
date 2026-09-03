@@ -23,6 +23,9 @@ pull requests and applies on merge.
 - **A pipeline you can trust**: format, lint, validate and unit tests on every
   pull request, a speculative plan posted on the PR, and an apply of exactly
   that saved plan behind GitHub environment approvals.
+- **Guardrails as code**: Sentinel policies evaluated by HCP Terraform on
+  every run require the platform tags on all resources and cap compute at
+  `medium` instance sizes.
 
 ## How it fits together
 
@@ -38,13 +41,14 @@ flowchart LR
 
 ## Repository layout
 
-```
+```text
 .
 ├── .github/                 # workflows, issue and PR templates, CODEOWNERS
 ├── infra/
 │   ├── modules/
 │   │   ├── aws-vpc/         # network module (+ unit tests)
 │   │   └── aws-eks-cluster/ # cluster module (+ unit tests)
+│   ├── policies/            # Sentinel policy set for HCP Terraform (+ tests)
 │   └── environments/
 │       ├── dev/             # root module → workspace hashi-platform-dev
 │       ├── staging/         # root module → workspace hashi-platform-staging
@@ -62,7 +66,7 @@ Each module has its own README with inputs, outputs and examples:
 
 ## Getting started
 
-Prerequisites: Terraform 1.16.x, [tflint](https://github.com/terraform-linters/tflint),
+Prerequisites: Terraform 1.15.x, [tflint](https://github.com/terraform-linters/tflint),
 an HCP Terraform account with access to the `tim-krebs-org` organization, and
 optionally [pre-commit](https://pre-commit.com).
 

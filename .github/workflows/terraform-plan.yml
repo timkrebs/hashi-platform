@@ -29,6 +29,8 @@ env:
   # the workspace version in HCP Terraform.
   TERRAFORM_VERSION: "~> 1.15.0"
   TFLINT_VERSION: v0.61.0
+  SENTINEL_VERSION: "0.41.0"
+  SENTINEL_SHA256: "357ca824c9ac3ab11520a5ad2c2547b34aeb01dd4e3b9f1c7dc325d0be8a9935"
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
 
@@ -114,10 +116,33 @@ jobs:
           terraform -chdir="${DIRECTORY}" init -backend=false
           terraform -chdir="${DIRECTORY}" validate
 
+  # The Sentinel policies in infra/policies gate every run in HCP Terraform, so
+  # their own tests run here before a plan is requested.
+  policies:
+    name: Sentinel policies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Sentinel
+        run: |
+          curl -fsSLo sentinel.zip "https://releases.hashicorp.com/sentinel/${SENTINEL_VERSION}/sentinel_${SENTINEL_VERSION}_linux_amd64.zip"
+          echo "${SENTINEL_SHA256}  sentinel.zip" | sha256sum -c -
+          unzip -q sentinel.zip -d "${RUNNER_TEMP}/sentinel"
+          echo "${RUNNER_TEMP}/sentinel" >> "$GITHUB_PATH"
+
+      - name: sentinel fmt
+        working-directory: infra/policies
+        run: sentinel fmt -check -write=false ./*.sentinel ./testdata/*.sentinel
+
+      - name: sentinel test
+        working-directory: infra/policies
+        run: sentinel test -verbose
+
   plan:
     name: Plan ${{ needs.resolve.outputs.environment }}
     runs-on: ubuntu-latest
-    needs: [resolve, checks]
+    needs: [resolve, checks, policies]
     if: needs.resolve.outputs.ready == 'true'
     env:
       ENVIRONMENT: ${{ needs.resolve.outputs.environment }}

@@ -1,0 +1,85 @@
+# Every AWS resource that supports tags must carry the platform's mandatory
+# tags. Tags may be set on the resource itself (`tags`) or come from the
+# provider's default_tags (`tags_all`); either satisfies the policy.
+#
+# Only resources being created or updated are checked. Resources whose tag set
+# is entirely unknown until apply fail closed, because the policy cannot prove
+# they will be tagged.
+
+import "tfplan/v2" as tfplan
+import "strings"
+import "types"
+
+param mandatory_tags default ["Environment", "Project", "ManagedBy"]
+
+is_aws = func(rc) {
+	return strings.has_suffix(rc.provider_name, "hashicorp/aws")
+}
+
+is_create_or_update = func(rc) {
+	return "create" in rc.change.actions or "update" in rc.change.actions
+}
+
+# A resource supports tags when its planned attributes include `tags`, either
+# as a known value or as a value known only after apply.
+is_taggable = func(rc) {
+	return "tags" in keys(rc.change.after) or
+		"tags" in keys(rc.change.after_unknown)
+}
+
+# True when neither `tags` nor `tags_all` can be inspected at plan time.
+tags_wholly_unknown = func(rc) {
+	tags_unknown = (rc.change.after_unknown.tags else false) is true
+	tags_all_unknown = (rc.change.after_unknown.tags_all else false) is true
+	tags_known = (rc.change.after.tags else null) is not null
+	tags_all_known = (rc.change.after.tags_all else null) is not null
+	return (tags_unknown and tags_all_unknown) or
+		(tags_unknown and not tags_all_known) or
+		(tags_all_unknown and not tags_known)
+}
+
+# Tag keys the plan proves will exist: known keys from `tags` and `tags_all`,
+# plus keys whose values are known only after apply (the key itself is set).
+present_tag_keys = func(rc) {
+	result = []
+	for ["tags", "tags_all"] as attr {
+		known = rc.change.after[attr] else null
+		if known is not null {
+			result = result + keys(known)
+		}
+		unknown = rc.change.after_unknown[attr] else null
+		if unknown is not null and types.type_of(unknown) is "map" {
+			result = result + keys(unknown)
+		}
+	}
+	return result
+}
+
+candidates = filter tfplan.resource_changes as _, rc {
+	rc.mode is "managed" and
+		is_aws(rc) and
+		is_create_or_update(rc) and
+		is_taggable(rc)
+}
+
+violations = {}
+for candidates as address, rc {
+	if tags_wholly_unknown(rc) {
+		violations[address] = "tags are only known after apply and cannot be verified"
+		continue
+	}
+	present = present_tag_keys(rc)
+	missing = filter mandatory_tags as tag { tag not in present }
+	if length(missing) > 0 {
+		violations[address] = "missing mandatory tags: " + strings.join(missing, ", ")
+	}
+}
+
+if length(violations) > 0 {
+	print("Mandatory tags", mandatory_tags, "are missing on", length(violations), "resource(s):")
+	for violations as address, message {
+		print("  -", address, "->", message)
+	}
+}
+
+main = rule { length(violations) is 0 }

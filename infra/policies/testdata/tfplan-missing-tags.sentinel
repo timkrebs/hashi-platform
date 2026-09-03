@@ -1,0 +1,90 @@
+# Two resources missing mandatory tags: one with only a Name tag, one with no
+# tags at all. A compliant resource is included to make sure it is not flagged.
+terraform_version = "1.15.9"
+
+resource_changes = {
+	"aws_vpc.only_name": {
+		"address": "aws_vpc.only_name",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"cidr_block": "10.1.0.0/16",
+				"tags": {
+					"Name": "only-name",
+				},
+				"tags_all": {
+					"Name": "only-name",
+				},
+			},
+			"after_unknown": {
+				"id":       true,
+				"tags":     {},
+				"tags_all": {},
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "managed",
+		"module_address": "",
+		"name":           "only_name",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_vpc",
+	},
+	"aws_s3_bucket.untagged": {
+		"address": "aws_s3_bucket.untagged",
+		"change": {
+			"actions": ["update"],
+			"after": {
+				"bucket":   "untagged-bucket",
+				"tags":     null,
+				"tags_all": {},
+			},
+			"after_unknown": {},
+			"before": {
+				"bucket":   "untagged-bucket",
+				"tags":     null,
+				"tags_all": {},
+			},
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "managed",
+		"module_address": "",
+		"name":           "untagged",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_s3_bucket",
+	},
+	"aws_subnet.compliant": {
+		"address": "aws_subnet.compliant",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"cidr_block": "10.1.0.0/24",
+				"tags": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+				"tags_all": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+			},
+			"after_unknown": {
+				"id":       true,
+				"tags":     {},
+				"tags_all": {},
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "managed",
+		"module_address": "",
+		"name":           "compliant",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_subnet",
+	},
+}

@@ -19,6 +19,10 @@ for the modules once they are tagged.
   `hashi-platform-dev` HCP Terraform workspace.
 - GitHub Actions pipeline: static checks and speculative plan on pull
   requests, saved-plan apply behind environment protection on merge.
+- Sentinel policy set under `infra/policies`: `require-mandatory-tags`
+  (Environment, Project, ManagedBy on every taggable AWS resource) and
+  `restrict-compute-size` (no instance type larger than medium), both
+  hard-mandatory, with unit tests run in CI.
 - Repository scaffolding: shared tflint configuration, pre-commit hooks,
   Makefile, editorconfig, gitattributes, issue and pull request templates,
   CODEOWNERS, Dependabot for actions and Terraform.

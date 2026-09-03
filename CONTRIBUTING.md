@@ -19,7 +19,7 @@ be agreed before you invest time in it.
 
 You need:
 
-- Terraform 1.16.x (`brew install terraform` or [tenv](https://github.com/tofuutils/tenv))
+- Terraform 1.15.x (`brew install terraform` or [tenv](https://github.com/tofuutils/tenv))
 - [tflint](https://github.com/terraform-linters/tflint) 0.61 or newer
 - [pre-commit](https://pre-commit.com) (optional but recommended)
 - [actionlint](https://github.com/rhysd/actionlint) if you touch workflows
@@ -64,7 +64,7 @@ Never push directly to the three environment branches.
 Use [Conventional Commits](https://www.conventionalcommits.org/) with the
 module or environment as scope:
 
-```
+```text
 feat(aws-eks-cluster): support spot capacity in node groups
 fix(aws-vpc): reject subnet prefixes smaller than the VPC allows
 docs(infra): describe how to add an environment
@@ -90,6 +90,15 @@ Types in use: `feat`, `fix`, `docs`, `refactor`, `test`, `ci`, `chore`.
   module README (inputs, outputs, examples).
 - Never commit credentials, account identifiers or state. Environment
   `<name>.tfvars` files are tracked on purpose and must stay free of secrets.
+
+## Policy changes
+
+Sentinel policies live in `infra/policies` and gate every HCP Terraform run in
+the project. A policy change needs a matching test case under
+`infra/policies/test/<policy>/` (a `pass` and a `fail` mock at minimum) and
+must keep the existing environments compliant. Run `make policy-test`, which
+needs the [Sentinel CLI](https://releases.hashicorp.com/sentinel/); CI runs
+the same checks in the `Sentinel policies` job.
 
 ## Pull request checklist
 

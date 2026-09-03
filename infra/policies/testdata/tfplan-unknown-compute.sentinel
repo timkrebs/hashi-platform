@@ -1,0 +1,38 @@
+# An instance type that is only known after apply (for example taken from a
+# data source). The policy cannot prove its size, so it must fail closed.
+terraform_version = "1.15.9"
+
+resource_changes = {
+	"aws_instance.from_data_source": {
+		"address": "aws_instance.from_data_source",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"tags": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+				"tags_all": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+			},
+			"after_unknown": {
+				"id":            true,
+				"instance_type": true,
+				"tags":          {},
+				"tags_all":      {},
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "managed",
+		"module_address": "",
+		"name":           "from_data_source",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_instance",
+	},
+}
