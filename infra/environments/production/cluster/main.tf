@@ -3,20 +3,21 @@ provider "aws" {
 }
 
 module "network" {
-  source = "../../modules/aws-vpc"
+  source = "../../../modules/aws-vpc"
 
   name       = "${local.cluster_name}-vpc"
   cidr_block = var.vpc_cidr_block
   az_count   = var.az_count
 
-  # One shared NAT gateway keeps the dev bill down at the cost of zone redundancy.
-  single_nat_gateway = true
+  # Production keeps one NAT gateway per availability zone so the loss of a
+  # zone does not take private egress down with it.
+  single_nat_gateway = false
 
   tags = local.common_tags
 }
 
 module "eks" {
-  source = "../../modules/aws-eks-cluster"
+  source = "../../../modules/aws-eks-cluster"
 
   cluster_name    = local.cluster_name
   cluster_version = var.cluster_version
@@ -25,10 +26,6 @@ module "eks" {
   subnet_ids = module.network.private_subnet_ids
 
   node_groups = var.node_groups
-
-  # Dev is ephemeral and rebuilt often; schedule the old secrets key for
-  # deletion after the minimum window instead of the 30-day default.
-  kms_key_deletion_window_in_days = 7
 
   tags = local.common_tags
 }
