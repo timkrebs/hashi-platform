@@ -9,7 +9,7 @@ updates:
   - package-ecosystem: terraform
     directories:
       - "/infra/modules/*"
-      - "/infra/environments/*"
+      - "/infra/environments/*/*"
     schedule:
       interval: weekly
     groups:

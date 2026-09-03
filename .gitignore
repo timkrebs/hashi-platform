@@ -17,9 +17,9 @@ override.tf.json
 # tracked explicitly; every other *.tfvars stays out of the repository.
 *.tfvars
 *.tfvars.json
-!infra/environments/dev/dev.tfvars
-!infra/environments/staging/staging.tfvars
-!infra/environments/production/production.tfvars
+!infra/environments/dev/*/dev.tfvars
+!infra/environments/staging/*/staging.tfvars
+!infra/environments/production/*/production.tfvars
 
 # Terraform CLI configuration (may contain tokens)
 .terraformrc
@@ -29,7 +29,10 @@ terraform.rc
 .tflint.d/
 plan.txt
 apply.txt
+destroy.txt
+destroy-*.txt
 plan-report.md
+plan-report-*.md
 
 # Editors and operating systems
 .DS_Store

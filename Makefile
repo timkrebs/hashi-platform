@@ -4,14 +4,15 @@ SHELL := /bin/bash
 
 TFLINT_CONFIG := $(CURDIR)/.tflint.hcl
 MODULE_DIRS   := $(wildcard infra/modules/*)
-ENV_DIRS      := $(patsubst %/,%,$(dir $(wildcard infra/environments/*/main.tf)))
+ENV_DIRS      := $(patsubst %/,%,$(dir $(wildcard infra/environments/*/*/main.tf)))
 TF_DIRS       := $(MODULE_DIRS) $(ENV_DIRS)
 ENV           ?= dev
+LAYER         ?= cluster
 
 .PHONY: help fmt fmt-check lint validate test policy-test check plan clean
 
 help: ## Show this help
-	@awk 'BEGIN {FS = ":.*##"; printf "Usage: make <target> [ENV=dev]\n\n"} /^[a-zA-Z_-]+:.*?##/ {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf "Usage: make <target> [ENV=dev] [LAYER=cluster|platform]\n\n"} /^[a-zA-Z_-]+:.*?##/ {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 fmt: ## Format all Terraform files in place
 	terraform fmt -recursive infra
@@ -51,9 +52,9 @@ policy-test: ## Format-check and test the Sentinel policies (needs the sentinel 
 
 check: fmt-check lint validate test policy-test ## Everything CI runs before a plan
 
-plan: ## Speculative plan for ENV (default dev) against its HCP Terraform workspace
-	terraform -chdir="infra/environments/$(ENV)" init -input=false
-	terraform -chdir="infra/environments/$(ENV)" plan -input=false -var-file="$(ENV).tfvars"
+plan: ## Speculative plan for ENV/LAYER (default dev/cluster) against its HCP Terraform workspace
+	terraform -chdir="infra/environments/$(ENV)/$(LAYER)" init -input=false
+	terraform -chdir="infra/environments/$(ENV)/$(LAYER)" plan -input=false -var-file="$(ENV).tfvars"
 
 clean: ## Remove local .terraform directories
 	find infra -type d -name .terraform -prune -exec rm -rf {} +
