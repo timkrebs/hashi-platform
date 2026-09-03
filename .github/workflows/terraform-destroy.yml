@@ -1,0 +1,156 @@
+# Tears down an ephemeral environment (dev or staging) in HCP Terraform.
+#
+# Runs automatically when a promotion pull request is merged:
+#   dev     -> staging      destroys dev
+#   staging -> production   destroys staging
+# and on demand through "Run workflow" for dev or staging. Production is never
+# a target.
+#
+# The destroy job is bound to the GitHub environment of the branch being
+# destroyed, so staging's required reviewers gate it, and it shares the apply
+# workflow's concurrency group, so a push that lands during the destroy queues
+# behind it and recreates the environment afterwards.
+#
+# HCP Terraform additionally destroys dev and staging after one day without
+# runs (workspace setting auto-destroy-activity-duration).
+name: Terraform destroy
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [staging, production]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to destroy
+        type: choice
+        required: true
+        options: [dev, staging]
+      confirm:
+        description: Type the environment name again to confirm
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  TERRAFORM_VERSION: "~> 1.15.0"
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+
+jobs:
+  resolve:
+    name: Resolve environment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+    steps:
+      - id: env
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          THIS_REPO: ${{ github.repository }}
+          INPUT_ENVIRONMENT: ${{ inputs.environment }}
+          INPUT_CONFIRM: ${{ inputs.confirm }}
+        run: |
+          environment=""
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            if [ "${INPUT_CONFIRM}" != "${INPUT_ENVIRONMENT}" ]; then
+              echo "::error::Confirmation '${INPUT_CONFIRM}' does not match the environment '${INPUT_ENVIRONMENT}'."
+              exit 1
+            fi
+            environment="${INPUT_ENVIRONMENT}"
+          elif [ "${MERGED}" = "true" ] && [ "${HEAD_REPO}" = "${THIS_REPO}" ]; then
+            case "${BASE_REF}:${HEAD_REF}" in
+              staging:dev)        environment="dev" ;;
+              production:staging) environment="staging" ;;
+            esac
+          fi
+
+          case "${environment}" in
+            dev|staging)
+              echo "Promotion detected; ${environment} will be destroyed."
+              ;;
+            "")
+              echo "::notice::Not a promotion merge (${HEAD_REF} -> ${BASE_REF}); nothing to destroy."
+              ;;
+            *)
+              echo "::error::Refusing to destroy '${environment}'."
+              exit 1
+              ;;
+          esac
+          echo "environment=${environment}" >> "$GITHUB_OUTPUT"
+
+  destroy:
+    name: Destroy ${{ needs.resolve.outputs.environment }}
+    runs-on: ubuntu-latest
+    needs: resolve
+    if: needs.resolve.outputs.environment != ''
+    environment:
+      name: ${{ needs.resolve.outputs.environment }}
+    concurrency:
+      group: terraform-apply-${{ needs.resolve.outputs.environment }}
+      cancel-in-progress: false
+    env:
+      ENVIRONMENT: ${{ needs.resolve.outputs.environment }}
+      DIRECTORY: infra/environments/${{ needs.resolve.outputs.environment }}
+    steps:
+      # Destroy with the configuration that was applied: the environment's own branch.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve.outputs.environment }}
+
+      - id: config
+        name: Check configuration
+        run: |
+          if [ -f "${DIRECTORY}/main.tf" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${DIRECTORY}/main.tf does not exist on branch ${ENVIRONMENT}; nothing to destroy."
+          fi
+
+      - uses: hashicorp/setup-terraform@v4
+        if: steps.config.outputs.ready == 'true'
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: terraform init
+        if: steps.config.outputs.ready == 'true'
+        working-directory: ${{ env.DIRECTORY }}
+        run: terraform init
+
+      - name: terraform destroy
+        if: steps.config.outputs.ready == 'true'
+        working-directory: ${{ env.DIRECTORY }}
+        run: terraform destroy -auto-approve -no-color -var-file="${ENVIRONMENT}.tfvars" 2>&1 | tee destroy.txt
+
+      - name: Destroy summary
+        if: always() && steps.config.outputs.ready == 'true'
+        working-directory: ${{ env.DIRECTORY }}
+        run: |
+          status_line=$(grep -E '^(Destroy complete!|Apply complete!|No changes\.|Error:)' destroy.txt | head -n 1 || true)
+          run_url=$(grep -Eo 'https://app\.terraform\.io/app/[^[:space:]]+' destroy.txt | head -n 1 || true)
+          {
+            echo "### Terraform destroy for \`${ENVIRONMENT}\`"
+            echo
+            echo "**${status_line:-See output below}**"
+            if [ -n "${run_url}" ]; then
+              echo
+              echo "HCP Terraform run: ${run_url}"
+            fi
+            echo
+            echo "<details><summary>Destroy output</summary>"
+            echo
+            echo '```text'
+            cat destroy.txt
+            echo '```'
+            echo
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"

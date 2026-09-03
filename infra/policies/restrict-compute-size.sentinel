@@ -1,0 +1,116 @@
+# Compute for the platform stays at "medium" or smaller. Any instance type
+# whose size suffix is not in `allowed_sizes` is rejected, wherever it appears:
+# EKS managed node groups, EC2 instances, launch templates and configurations,
+# and Auto Scaling group instance overrides.
+#
+# Only resources being created or updated are checked. Instance types that are
+# unknown until apply fail closed, because the policy cannot prove their size.
+
+import "tfplan/v2" as tfplan
+import "strings"
+
+param allowed_sizes default ["nano", "micro", "small", "medium"]
+
+# Resource types with a single instance type attribute.
+instance_type_attrs = {
+	"aws_instance":              "instance_type",
+	"aws_launch_template":       "instance_type",
+	"aws_launch_configuration":  "instance_type",
+	"aws_spot_instance_request": "instance_type",
+}
+
+is_aws = func(rc) {
+	return strings.has_suffix(rc.provider_name, "hashicorp/aws")
+}
+
+is_create_or_update = func(rc) {
+	return "create" in rc.change.actions or "update" in rc.change.actions
+}
+
+# "t3.medium" -> "medium", "c6i.metal" -> "metal", "m7i-flex.large" -> "large"
+size_of = func(instance_type) {
+	parts = strings.split(instance_type, ".")
+	if length(parts) < 2 {
+		return instance_type
+	}
+	return parts[1]
+}
+
+is_allowed = func(instance_type) {
+	return size_of(instance_type) in allowed_sizes
+}
+
+# Instance types a resource will use. Returns null when they cannot be
+# determined at plan time.
+instance_types_of = func(rc) {
+	after = rc.change.after
+	unknown = rc.change.after_unknown
+	result = []
+
+	if rc.type is "aws_eks_node_group" {
+		if (unknown.instance_types else false) is true {
+			return null
+		}
+		for after.instance_types else [] as t {
+			append(result, t)
+		}
+	} else if rc.type is "aws_autoscaling_group" {
+		if (unknown.mixed_instances_policy else false) is true {
+			return null
+		}
+		for after.mixed_instances_policy else [] as policy {
+			for policy.launch_template else [] as lt {
+				for lt.override else [] as override {
+					instance_type = override.instance_type else null
+					if instance_type is not null {
+						append(result, instance_type)
+					}
+				}
+			}
+		}
+	} else if rc.type in keys(instance_type_attrs) {
+		attr = instance_type_attrs[rc.type]
+		if (unknown[attr] else false) is true {
+			return null
+		}
+		instance_type = after[attr] else null
+		if instance_type is not null {
+			append(result, instance_type)
+		}
+	}
+
+	return result
+}
+
+compute = filter tfplan.resource_changes as _, rc {
+	rc.mode is "managed" and
+		is_aws(rc) and
+		is_create_or_update(rc) and
+		(rc.type is "aws_eks_node_group" or
+			rc.type is "aws_autoscaling_group" or
+			rc.type in keys(instance_type_attrs))
+}
+
+violations = {}
+for compute as address, rc {
+	found = instance_types_of(rc)
+	if found is null {
+		violations[address] = "instance type is only known after apply and cannot be verified"
+		continue
+	}
+	too_large = filter found as t { not is_allowed(t) }
+	if length(too_large) > 0 {
+		violations[address] = "uses " + strings.join(too_large, ", ") +
+			"; allowed sizes are " +
+			strings.join(allowed_sizes, ", ")
+	}
+}
+
+if length(violations) > 0 {
+	print("Compute larger than allowed on", length(violations), "resource(s):")
+	for violations as address, message {
+		print("  -", address, "->", message)
+	}
+}
+
+main = rule { length(violations) is 0 }

@@ -1,0 +1,166 @@
+# Oversized compute in every place the policy looks: a node group, an EC2
+# instance, a launch template and an Auto Scaling group override. One
+# compliant node group is included to make sure it is not flagged.
+terraform_version = "1.15.9"
+
+resource_changes = {
+	"module.eks.aws_eks_node_group.large": {
+		"address": "module.eks.aws_eks_node_group.large",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"instance_types": ["t3.medium", "m5.large"],
+				"tags": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+				"tags_all": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+			},
+			"after_unknown": {
+				"id":             true,
+				"instance_types": [false, false],
+				"tags":           {},
+				"tags_all":       {},
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "managed",
+		"module_address": "module.eks",
+		"name":           "large",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_eks_node_group",
+	},
+	"aws_instance.bastion": {
+		"address": "aws_instance.bastion",
+		"change": {
+			"actions": ["update"],
+			"after": {
+				"instance_type": "t3.large",
+				"tags": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+				"tags_all": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+			},
+			"after_unknown": {},
+			"before": {
+				"instance_type": "t3.medium",
+			},
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "managed",
+		"module_address": "",
+		"name":           "bastion",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_instance",
+	},
+	"aws_launch_template.metal": {
+		"address": "aws_launch_template.metal",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"instance_type": "c6i.metal",
+				"tags": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+				"tags_all": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+			},
+			"after_unknown": {
+				"id":       true,
+				"tags":     {},
+				"tags_all": {},
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "managed",
+		"module_address": "",
+		"name":           "metal",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_launch_template",
+	},
+	"aws_autoscaling_group.mixed": {
+		"address": "aws_autoscaling_group.mixed",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"mixed_instances_policy": [
+					{
+						"launch_template": [
+							{
+								"override": [
+									{"instance_type": "t3.medium"},
+									{"instance_type": "c5.xlarge"},
+								],
+							},
+						],
+					},
+				],
+			},
+			"after_unknown": {
+				"id": true,
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "managed",
+		"module_address": "",
+		"name":           "mixed",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_autoscaling_group",
+	},
+	"module.eks.aws_eks_node_group.compliant": {
+		"address": "module.eks.aws_eks_node_group.compliant",
+		"change": {
+			"actions": ["create"],
+			"after": {
+				"instance_types": ["t4g.medium"],
+				"tags": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+				"tags_all": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+			},
+			"after_unknown": {
+				"id":             true,
+				"instance_types": [false],
+				"tags":           {},
+				"tags_all":       {},
+			},
+			"before": null,
+		},
+		"deposed":        "",
+		"index":          null,
+		"mode":           "managed",
+		"module_address": "module.eks",
+		"name":           "compliant",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_eks_node_group",
+	},
+}

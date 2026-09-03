@@ -5,6 +5,7 @@
 *.tfvars     text
 *.hcl        text
 *.tftest.hcl text linguist-language=HCL
+*.sentinel   text
 *.md         text
 *.yml        text
 *.yaml       text

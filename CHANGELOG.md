@@ -19,6 +19,16 @@ for the modules once they are tagged.
   `hashi-platform-dev` HCP Terraform workspace.
 - GitHub Actions pipeline: static checks and speculative plan on pull
   requests, saved-plan apply behind environment protection on merge.
+- Sentinel policy set under `infra/policies`: `require-mandatory-tags`
+  (Environment, Project, ManagedBy on every taggable AWS resource) and
+  `restrict-compute-size` (no instance type larger than medium), both
+  hard-mandatory, with unit tests run in CI.
+- Ephemeral dev and staging: `terraform-destroy.yml` destroys the source
+  environment when a promotion pull request is merged (or on manual
+  dispatch), and the dev and staging workspaces auto-destroy after one day
+  without runs.
+- `aws-eks-cluster` input `kms_key_deletion_window_in_days` (default 30);
+  dev uses the 7-day minimum.
 - Repository scaffolding: shared tflint configuration, pre-commit hooks,
   Makefile, editorconfig, gitattributes, issue and pull request templates,
   CODEOWNERS, Dependabot for actions and Terraform.

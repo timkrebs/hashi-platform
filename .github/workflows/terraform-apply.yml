@@ -26,7 +26,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  TERRAFORM_VERSION: "<1.17.0"
+  TERRAFORM_VERSION: "~> 1.15.0"
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
 

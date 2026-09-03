@@ -8,7 +8,7 @@ ENV_DIRS      := $(patsubst %/,%,$(dir $(wildcard infra/environments/*/main.tf))
 TF_DIRS       := $(MODULE_DIRS) $(ENV_DIRS)
 ENV           ?= dev
 
-.PHONY: help fmt fmt-check lint validate test check plan clean
+.PHONY: help fmt fmt-check lint validate test policy-test check plan clean
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage: make <target> [ENV=dev]\n\n"} /^[a-zA-Z_-]+:.*?##/ {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -40,7 +40,16 @@ test: ## Run the module unit tests (mocked providers, no AWS credentials)
 		terraform -chdir="$$dir" test || exit 1; \
 	done
 
-check: fmt-check lint validate test ## Everything CI runs before a plan
+policy-test: ## Format-check and test the Sentinel policies (needs the sentinel CLI)
+	@if ! command -v sentinel >/dev/null 2>&1; then \
+		echo "sentinel CLI not found; skipping policy tests (see infra/policies/README.md)"; \
+	else \
+		cd infra/policies && \
+		sentinel fmt -check -write=false ./*.sentinel ./testdata/*.sentinel && \
+		sentinel test -verbose; \
+	fi
+
+check: fmt-check lint validate test policy-test ## Everything CI runs before a plan
 
 plan: ## Speculative plan for ENV (default dev) against its HCP Terraform workspace
 	terraform -chdir="infra/environments/$(ENV)" init -input=false
