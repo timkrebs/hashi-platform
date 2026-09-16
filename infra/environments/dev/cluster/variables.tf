@@ -19,7 +19,7 @@ variable "az_count" {
 variable "cluster_version" {
   description = "Kubernetes minor version for the EKS control plane."
   type        = string
-  default     = "1.33"
+  default     = "1.36"
 }
 
 variable "node_groups" {
@@ -41,8 +41,8 @@ variable "node_groups" {
     default = {
       instance_types = ["t3.medium"]
       min_size       = 1
-      max_size       = 3
-      desired_size   = 2
+      max_size       = 4
+      desired_size   = 3
     }
   }
 }
