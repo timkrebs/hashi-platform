@@ -14,15 +14,12 @@ infra/
 │   ├── aws-eks-cluster/               # EKS control plane, managed node groups, EBS CSI IRSA
 │   ├── aws-load-balancer-controller/  # NLB/ALB controller with IRSA (platform layer)
 │   ├── cert-manager/                  # certificates for in-cluster TLS (platform layer)
-│   ├── argocd/                        # Argo CD plus the in-cluster secret bridge (platform layer)
-│   ├── argocd-root-app/               # root Application syncing gitops/clusters/<env>
-│   ├── vault-aws-prerequisites/       # KMS unseal key, IRSA roles, init secret for Vault
 │   └── boundary/                      # HCP Boundary placeholder, disabled
 ├── policies/                          # Sentinel policy set evaluated by HCP Terraform
 └── environments/
     ├── dev/
     │   ├── cluster/                   # layer 1: network + EKS,   workspace hashi-platform-dev
-    │   └── platform/                  # layer 2: add-ons + Argo,  workspace hashi-platform-dev-platform
+    │   └── platform/                  # layer 2: cluster add-ons, workspace hashi-platform-dev-platform
     ├── staging/                       # same two layers, workspaces hashi-platform-staging[-platform]
     └── production/                    # same two layers, workspaces hashi-platform-production[-platform]
 ```
@@ -34,22 +31,22 @@ Each environment has two root modules, applied in this order:
 1. **`cluster/`** builds the network and the EKS cluster from `aws-vpc` and
    `aws-eks-cluster`. Its outputs (API endpoint, CA, OIDC provider, VPC id,
    account id) reach the next layer through HCP Terraform remote state.
-2. **`platform/`** prepares the cluster for GitOps: the AWS Load Balancer
-   Controller, cert-manager, Vault's AWS prerequisites (KMS unseal key, IRSA
-   roles, Secrets Manager secret for the init output), Argo CD, and the root
-   Argo CD Application that syncs `gitops/clusters/<env>` from the
-   environment's branch. Workloads such as Vault are reconciled by Argo CD
-   from there, not by Terraform.
+2. **`platform/`** installs the in-cluster add-ons workloads depend on: the
+   AWS Load Balancer Controller (with IRSA) and cert-manager. Secrets are
+   served by HCP Vault Dedicated, which runs outside this configuration and is
+   not managed by Terraform here.
 
 ```hcl
 # environments/<env>/platform/main.tf (excerpt)
-module "argocd_root_app" {
-  source          = "../../../modules/argocd-root-app"
-  repo_url        = "https://github.com/timkrebs/hashi-platform.git"
-  target_revision = "dev"
-  path            = "gitops/clusters/dev"
+module "aws_load_balancer_controller" {
+  source = "../../../modules/aws-load-balancer-controller"
 
-  depends_on = [module.argocd, module.aws_load_balancer_controller, module.cert_manager]
+  cluster_name      = local.cluster_name
+  region            = var.region
+  vpc_id            = local.cluster.vpc_id
+  oidc_provider_arn = local.cluster.oidc_provider_arn
+
+  tags = local.common_tags
 }
 ```
 
@@ -60,17 +57,11 @@ which breaks on cluster replacement and on destroy. The platform layer
 authenticates with a token from `aws_eks_cluster_auth`, so no `aws` CLI is
 needed on HCP Terraform workers.
 
-Destroy order is platform first, then cluster. The root Application carries
-the Argo CD resources finalizer and its Helm release waits on uninstall, so
-Terraform does not remove the load balancer controller until Argo CD has
-deleted the workloads and the AWS objects they created (NLBs, EBS volumes).
-
-Terraform hands account-specific values to GitOps through annotations on the
-Argo CD in-cluster secret (`hashi-platform.io/*`: account id, region, KMS
-alias, IRSA role ARNs, init secret name, Vault allow-list). ApplicationSets
-read them with a cluster generator, so nothing under `gitops/` has to know
-the account. The repository is public; keep it that way by never putting
-identifiers or secrets in `gitops/`.
+Destroy order is platform first, then cluster, so the load balancer
+controller is still running when the AWS objects that in-cluster workloads
+created (NLBs, EBS volumes) have to go. Workloads deployed by hand must be
+removed before the platform layer is destroyed; see
+[Ephemeral environments](#ephemeral-environments).
 
 The network and the cluster remain separate modules because they have
 different lifecycles. Dependencies flow through the root modules only;
@@ -92,7 +83,10 @@ down when they are promoted or left idle; see
 
 ## Prerequisites
 
-- Terraform `~> 1.15.0` (the environments pin this; modules accept `>= 1.9`)
+- Terraform `~> 1.15.0` (the environments pin this; modules accept `>= 1.9`).
+  The exact version lives in `.terraform-version` at the repository root, so
+  [tenv](https://github.com/tofuutils/tenv) selects it automatically; a 1.16
+  binary fails `terraform init` on the environment roots.
 - `terraform login` for HCP Terraform
 - Optional: [tflint](https://github.com/terraform-linters/tflint)
 
@@ -124,7 +118,7 @@ the public endpoint the cluster exposes.
 
 Environment identity (project, environment name, cluster name, common tags)
 is fixed in each layer's `locals.tf`. Tunables such as the region, VPC CIDR,
-node groups and the Vault allow-list are variables with sensible defaults,
+node groups and the cert-manager toggle are variables with sensible defaults,
 overridden in `<environment>.tfvars`. Those files are committed on purpose
 because CI plans with them (the root `.gitignore` lists them as exceptions to
 the general `*.tfvars` rule); never put secrets in them.
@@ -224,10 +218,7 @@ branch content, switch it at the same time:
    remote state sharing from the cluster workspace, and auto-destroy `1d` on
    dev and staging.
 3. Merge. The cluster layer plans with no changes; the platform layer then
-   installs Argo CD and the add-ons.
-4. The `gitops/` tree Argo CD syncs (`gitops/clusters/<env>`, the Vault
-   application and its values) does not exist yet; the root Application
-   reports a missing path until it lands, which is harmless.
+   installs the add-ons.
 
 ## Ephemeral environments
 
@@ -258,15 +249,14 @@ running up a bill:
 Rules that keep destroys clean:
 
 - AWS resources created from inside the cluster (NLBs from `LoadBalancer`
-  services, EBS volumes from persistent volume claims) are only allowed for
-  workloads Argo CD manages through the root Application, because deleting
-  that Application cascades to them before Terraform uninstalls the load
-  balancer controller and the cluster. Workloads must clean up after
-  themselves: `LoadBalancer` services are deleted with the app, and
-  StatefulSets in ephemeral environments set
+  services, EBS volumes from persistent volume claims) must be gone before the
+  platform layer is destroyed, because Terraform uninstalls the load balancer
+  controller with it. Workloads must clean up after themselves:
+  `LoadBalancer` services are deleted with the app, and StatefulSets in
+  ephemeral environments set
   `persistentVolumeClaimRetentionPolicy.whenDeleted: Delete`. Anything created
-  by hand with `kubectl` is invisible to both Terraform and Argo CD and blocks
-  the VPC destroy; CI has no AWS credentials to clean it up.
+  by hand with `kubectl` is invisible to Terraform and blocks the VPC destroy;
+  CI has no AWS credentials to clean it up.
 - Destroy the platform layer before the cluster layer, never the other way
   round. If the cluster goes first, the controller that deletes NLBs is gone
   and the VPC destroy fails.
@@ -304,19 +294,15 @@ effect once they land on the branch the set follows. See the
 4. In each layer's `locals.tf`, set `environment`.
 5. Rename `dev.tfvars` to `<name>.tfvars` in both layers, choose a VPC CIDR
    that does not overlap with other environments (dev `10.0.0.0/16`, staging
-   `10.1.0.0/16`, production `10.2.0.0/16`), size the node groups and set the
-   Vault allow-list. For production, also set `single_nat_gateway = false` on
-   the network module and keep the 30-day KMS and secret windows.
+   `10.1.0.0/16`, production `10.2.0.0/16`) and size the node groups. For
+   production, also set `single_nat_gateway = false` on the network module.
 6. Add `!infra/environments/<name>/*/<name>.tfvars` to the root `.gitignore`,
    next to the existing exceptions.
-7. Add `gitops/clusters/<name>/` and the environment's values files under
-   `gitops/apps/*/values/` once the GitOps tree exists.
-8. Add the branch name to the `branches` lists in `terraform-plan.yml` and
+7. Add the branch name to the `branches` lists in `terraform-plan.yml` and
    `terraform-apply.yml`.
-9. If the environment is ephemeral, set `auto-destroy-activity-duration`
+8. If the environment is ephemeral, set `auto-destroy-activity-duration`
    (`1d` platform, `2d` cluster), pass `kms_key_deletion_window_in_days = 7`
-   to the cluster module, use the 7-day KMS and 0-day secret windows in the
-   platform tfvars, and add its promotion pair and dispatch option to
+   to the cluster module, and add its promotion pair and dispatch option to
    `terraform-destroy.yml`.
 
 ## Testing the modules
@@ -349,8 +335,6 @@ tflint --recursive --config "$PWD/.tflint.hcl"
 | terraform-aws-modules/iam/aws (assumable-role-oidc, irsa-eks)     | 5.39.0  |
 | Helm chart eks/aws-load-balancer-controller                       | 3.5.0   |
 | Helm chart jetstack/cert-manager                                  | 1.21.1  |
-| Helm chart argo/argo-cd                                           | 10.7.1  |
-| Helm chart argo/argocd-apps                                       | 2.0.5   |
 
 These are pinned inside the modules. Bump them there and run the unit tests
 plus a plan in dev before rolling forward. Dependabot does not track Helm

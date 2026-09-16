@@ -19,7 +19,10 @@ be agreed before you invest time in it.
 
 You need:
 
-- Terraform 1.15.x (`brew install terraform` or [tenv](https://github.com/tofuutils/tenv))
+- Terraform 1.15.x. The exact version is pinned in `.terraform-version`, so
+  [tenv](https://github.com/tofuutils/tenv) (`brew install tenv`, then
+  `tenv tf install` in the repository) picks it up on its own. The environment
+  roots require `~> 1.15.0` and a newer minor will fail `terraform init`.
 - [tflint](https://github.com/terraform-linters/tflint) 0.61 or newer
 - [pre-commit](https://pre-commit.com) (optional but recommended)
 - [actionlint](https://github.com/rhysd/actionlint) if you touch workflows

@@ -15,11 +15,9 @@ data "terraform_remote_state" "cluster" {
   }
 
   defaults = {
-    account_id                         = null
     cluster_name                       = local.cluster_name
     cluster_endpoint                   = null
     cluster_certificate_authority_data = null
-    oidc_provider                      = null
     oidc_provider_arn                  = null
     vpc_id                             = null
   }
@@ -30,5 +28,3 @@ data "terraform_remote_state" "cluster" {
 data "aws_eks_cluster_auth" "this" {
   name = local.cluster_name
 }
-
-data "aws_caller_identity" "current" {}

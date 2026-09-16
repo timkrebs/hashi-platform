@@ -1,9 +1,9 @@
 # cert-manager
 
 Installs [cert-manager](https://cert-manager.io/) with its CRDs into its own
-namespace. The platform uses it to issue Vault's self-signed CA and server
-certificate; issuers and certificates themselves are declared next to the
-workloads under `gitops/`, not here.
+namespace. It provides the issuing machinery for in-cluster TLS; the
+`Issuer` and `Certificate` objects themselves are declared next to the
+workloads that need them, not here.
 
 By default the CRDs are removed together with the release, so an ephemeral
 environment leaves nothing behind. Set `keep_crds_on_uninstall = true` where

@@ -88,29 +88,29 @@ resource_changes = {
 		"type":           "aws_subnet",
 	},
 	# Platform layer resource without tags: must be flagged.
-	"module.vault_prerequisites.aws_secretsmanager_secret.init": {
-		"address": "module.vault_prerequisites.aws_secretsmanager_secret.init",
+	"module.aws_load_balancer_controller.module.irsa.aws_iam_role.this[0]": {
+		"address": "module.aws_load_balancer_controller.module.irsa.aws_iam_role.this[0]",
 		"change": {
 			"actions": ["create"],
 			"after": {
-				"name": "hashi-platform/dev/vault/init",
-				"recovery_window_in_days": 0,
+				"name":     "hashi-platform-dev-cluster-alb-controller",
 				"tags":     null,
 				"tags_all": {},
 			},
 			"after_unknown": {
-				"arn":      true,
-				"id":       true,
-				"tags_all": {},
+				"arn":                true,
+				"id":                 true,
+				"assume_role_policy": true,
+				"tags_all":           {},
 			},
 			"before": null,
 		},
 		"deposed":        "",
-		"index":          null,
+		"index":          0,
 		"mode":           "managed",
-		"module_address": "module.vault_prerequisites",
-		"name":           "init",
+		"module_address": "module.aws_load_balancer_controller.module.irsa",
+		"name":           "this",
 		"provider_name":  "registry.terraform.io/hashicorp/aws",
-		"type":           "aws_secretsmanager_secret",
+		"type":           "aws_iam_role",
 	},
 }

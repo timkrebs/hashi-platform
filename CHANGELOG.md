@@ -30,14 +30,14 @@ for the modules once they are tagged.
 - `aws-eks-cluster` input `kms_key_deletion_window_in_days` (default 30);
   dev uses the 7-day minimum.
 - Platform layer per environment (`infra/environments/<env>/platform`,
-  workspace `hashi-platform-<env>-platform`): AWS Load Balancer Controller,
-  cert-manager, Vault AWS prerequisites (KMS unseal key, IRSA roles, init
-  secret), Argo CD with the in-cluster secret bridge, and the root
-  Application syncing `gitops/clusters/<env>`. New modules with unit tests:
-  `aws-load-balancer-controller`, `cert-manager`, `argocd`,
-  `argocd-root-app`, `vault-aws-prerequisites`, `boundary` (placeholder).
+  workspace `hashi-platform-<env>-platform`): AWS Load Balancer Controller and
+  cert-manager. New modules with unit tests:
+  `aws-load-balancer-controller`, `cert-manager`, `boundary` (placeholder).
 - Composite action `hcp-workspace-state` and a shared plan-report script for
   the workflows.
+- `.terraform-version` pinning Terraform to 1.15.9, so tenv and friends select
+  the version the environment roots require instead of a newer minor that
+  fails `terraform init`.
 - Repository scaffolding: shared tflint configuration, pre-commit hooks,
   Makefile, editorconfig, gitattributes, issue and pull request templates,
   CODEOWNERS, Dependabot for actions and Terraform.
@@ -61,6 +61,16 @@ for the modules once they are tagged.
 
 ### Removed
 
+- Argo CD from the platform layer: the `argocd` and `argocd-root-app` modules,
+  their module blocks, outputs and the in-cluster secret bridge
+  (`hashi-platform.io/*` annotations) in all three environments. Nothing in
+  this repository deploys workloads into the cluster any more.
+- Self-managed Vault: the `vault-aws-prerequisites` module (KMS unseal key,
+  unseal and init IRSA roles, Secrets Manager init secret) and the
+  `vault_allowed_cidrs`, `vault_kms_key_deletion_window_in_days` and
+  `vault_init_secret_recovery_window_in_days` variables from all three
+  platform layers. Secrets are served by HCP Vault Dedicated, which is
+  operated outside this configuration.
 - Unused `random_string` resource and the `random` provider requirement.
 
 [Unreleased]: https://github.com/timkrebs/hashi-platform/commits/dev

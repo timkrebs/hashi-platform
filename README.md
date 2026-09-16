@@ -52,7 +52,7 @@ flowchart LR
 │   └── environments/
 │       └── <env>/           # dev, staging, production
 │           ├── cluster/     # network + EKS       → workspace hashi-platform-<env>
-│           └── platform/    # add-ons + Argo CD   → workspace hashi-platform-<env>-platform
+│           └── platform/    # cluster add-ons     → workspace hashi-platform-<env>-platform
 ├── .tflint.hcl              # shared lint rules
 ├── .pre-commit-config.yaml  # local checks mirroring CI
 └── Makefile                 # fmt, lint, validate, test, plan

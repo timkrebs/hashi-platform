@@ -294,9 +294,9 @@ resource_changes = {
 		"provider_name":  "registry.terraform.io/hashicorp/time",
 		"type":           "time_sleep",
 	},
-	# Platform layer: Vault prerequisites, all tagged.
-	"module.vault_prerequisites.aws_kms_key.unseal": {
-		"address": "module.vault_prerequisites.aws_kms_key.unseal",
+	# Cluster layer: the EKS secrets-encryption key, tagged.
+	"module.eks.module.eks.module.kms.aws_kms_key.this[0]": {
+		"address": "module.eks.module.eks.module.kms.aws_kms_key.this[0]",
 		"change": {
 			"actions": ["create"],
 			"after": {
@@ -323,20 +323,20 @@ resource_changes = {
 			"before": null,
 		},
 		"deposed":        "",
-		"index":          null,
+		"index":          0,
 		"mode":           "managed",
-		"module_address": "module.vault_prerequisites",
-		"name":           "unseal",
+		"module_address": "module.eks.module.eks.module.kms",
+		"name":           "this",
 		"provider_name":  "registry.terraform.io/hashicorp/aws",
 		"type":           "aws_kms_key",
 	},
 	# KMS aliases cannot be tagged and must be ignored.
-	"module.vault_prerequisites.aws_kms_alias.unseal": {
-		"address": "module.vault_prerequisites.aws_kms_alias.unseal",
+	"module.eks.module.eks.module.kms.aws_kms_alias.this[\"cluster\"]": {
+		"address": "module.eks.module.eks.module.kms.aws_kms_alias.this[\"cluster\"]",
 		"change": {
 			"actions": ["create"],
 			"after": {
-				"name": "alias/hashi-platform-dev-vault-unseal",
+				"name": "alias/eks/hashi-platform-dev-cluster",
 			},
 			"after_unknown": {
 				"arn":           true,
@@ -346,19 +346,20 @@ resource_changes = {
 			"before": null,
 		},
 		"deposed":        "",
-		"index":          null,
+		"index":          "cluster",
 		"mode":           "managed",
-		"module_address": "module.vault_prerequisites",
-		"name":           "unseal",
+		"module_address": "module.eks.module.eks.module.kms",
+		"name":           "this",
 		"provider_name":  "registry.terraform.io/hashicorp/aws",
 		"type":           "aws_kms_alias",
 	},
-	"module.vault_prerequisites.aws_iam_policy.unseal": {
-		"address": "module.vault_prerequisites.aws_iam_policy.unseal",
+	# Platform layer: the load balancer controller's IRSA role, tagged.
+	"module.aws_load_balancer_controller.module.irsa.aws_iam_role.this[0]": {
+		"address": "module.aws_load_balancer_controller.module.irsa.aws_iam_role.this[0]",
 		"change": {
 			"actions": ["create"],
 			"after": {
-				"name": "hashi-platform-dev-vault-unseal",
+				"name": "hashi-platform-dev-cluster-alb-controller",
 				"tags": {
 					"Environment": "Dev",
 					"ManagedBy":   "Terraform",
@@ -371,65 +372,31 @@ resource_changes = {
 				},
 			},
 			"after_unknown": {
-				"arn":      true,
-				"id":       true,
-				"policy":   true,
-				"tags":     {},
-				"tags_all": {},
+				"arn":                true,
+				"id":                 true,
+				"assume_role_policy": true,
+				"tags":               {},
+				"tags_all":           {},
 			},
 			"before": null,
 		},
 		"deposed":        "",
-		"index":          null,
+		"index":          0,
 		"mode":           "managed",
-		"module_address": "module.vault_prerequisites",
-		"name":           "unseal",
+		"module_address": "module.aws_load_balancer_controller.module.irsa",
+		"name":           "this",
 		"provider_name":  "registry.terraform.io/hashicorp/aws",
-		"type":           "aws_iam_policy",
-	},
-	"module.vault_prerequisites.aws_secretsmanager_secret.init": {
-		"address": "module.vault_prerequisites.aws_secretsmanager_secret.init",
-		"change": {
-			"actions": ["create"],
-			"after": {
-				"name": "hashi-platform/dev/vault/init",
-				"recovery_window_in_days": 0,
-				"tags": {
-					"Environment": "Dev",
-					"ManagedBy":   "Terraform",
-					"Project":     "hashi-platform",
-				},
-				"tags_all": {
-					"Environment": "Dev",
-					"ManagedBy":   "Terraform",
-					"Project":     "hashi-platform",
-				},
-			},
-			"after_unknown": {
-				"arn":      true,
-				"id":       true,
-				"tags":     {},
-				"tags_all": {},
-			},
-			"before": null,
-		},
-		"deposed":        "",
-		"index":          null,
-		"mode":           "managed",
-		"module_address": "module.vault_prerequisites",
-		"name":           "init",
-		"provider_name":  "registry.terraform.io/hashicorp/aws",
-		"type":           "aws_secretsmanager_secret",
+		"type":           "aws_iam_role",
 	},
 	# Helm and Kubernetes resources belong to other providers: out of scope.
-	"module.argocd.helm_release.this": {
-		"address": "module.argocd.helm_release.this",
+	"module.cert_manager[0].helm_release.this": {
+		"address": "module.cert_manager[0].helm_release.this",
 		"change": {
 			"actions": ["create"],
 			"after": {
-				"chart":     "argo-cd",
-				"name":      "argocd",
-				"namespace": "argocd",
+				"chart":     "cert-manager",
+				"name":      "cert-manager",
+				"namespace": "cert-manager",
 			},
 			"after_unknown": {
 				"id":       true,
@@ -440,7 +407,7 @@ resource_changes = {
 		"deposed":        "",
 		"index":          null,
 		"mode":           "managed",
-		"module_address": "module.argocd",
+		"module_address": "module.cert_manager[0]",
 		"name":           "this",
 		"provider_name":  "registry.terraform.io/hashicorp/helm",
 		"type":           "helm_release",

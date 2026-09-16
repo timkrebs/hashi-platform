@@ -12,9 +12,10 @@
 # workflow's concurrency group, so a push that lands during the destroy queues
 # behind it and recreates the environment afterwards.
 #
-# Order matters: the platform layer removes Argo CD's workloads and the AWS
-# objects they created while the load balancer controller still runs. If the
-# platform destroy fails, the job stops and the cluster is left in place.
+# Order matters: the platform layer is destroyed first, so the AWS objects
+# in-cluster workloads created (NLBs, EBS volumes) can still be cleaned up
+# while the load balancer controller runs. If the platform destroy fails, the
+# job stops and the cluster is left in place.
 #
 # HCP Terraform additionally destroys idle dev and staging workspaces
 # (auto-destroy-activity-duration: platform 1d, cluster 2d).

@@ -3,9 +3,9 @@
 Installs the [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/)
 with an IRSA role, so that Kubernetes `Service` objects of type `LoadBalancer`
 and `Ingress` resources become NLBs and ALBs. It is part of the platform layer
-because workloads managed by Argo CD (Vault's public endpoint, later Boundary
-workers) rely on it, and because it must still be running when those
-workloads are deleted during a teardown, or their load balancers leak.
+because in-cluster workloads (later Boundary workers) rely on it, and because
+it must still be running when those workloads are deleted during a teardown,
+or their load balancers leak.
 
 The IAM policy comes from
 [terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks](https://registry.terraform.io/modules/terraform-aws-modules/iam/aws/5.39.0/submodules/iam-role-for-service-accounts-eks),
