@@ -17,16 +17,14 @@ infra/
 │   └── boundary/                      # HCP Boundary placeholder, disabled
 ├── policies/                          # Sentinel policy set evaluated by HCP Terraform
 └── environments/
-    ├── dev/
-    │   ├── cluster/                   # layer 1: network + EKS,   workspace hashi-platform-dev
-    │   └── platform/                  # layer 2: cluster add-ons, workspace hashi-platform-dev-platform
-    ├── staging/                       # same two layers, workspaces hashi-platform-staging[-platform]
-    └── production/                    # same two layers, workspaces hashi-platform-production[-platform]
+    └── dev/                           # the only environment
+        ├── cluster/                   # layer 1: network + EKS,   workspace hashi-platform-dev
+        └── platform/                  # layer 2: cluster add-ons, workspace hashi-platform-dev-platform
 ```
 
 ## Layers
 
-Each environment has two root modules, applied in this order:
+There is one environment, `dev`, with two root modules applied in this order:
 
 1. **`cluster/`** builds the network and the EKS cluster from `aws-vpc` and
    `aws-eks-cluster`. Its outputs (API endpoint, CA, OIDC provider, VPC id,
@@ -67,19 +65,16 @@ The network and the cluster remain separate modules because they have
 different lifecycles. Dependencies flow through the root modules only;
 modules never reference each other directly.
 
-## Branches, environments and workspaces
+## Branch, environment and workspaces
 
-| Branch | Roots under `infra/environments/<env>/` | HCP Terraform workspaces (cluster, platform) | GitHub environment |
+| Branch | Roots under `infra/environments/dev/` | HCP Terraform workspaces (cluster, platform) | GitHub environment |
 | --- | --- | --- | --- |
-| `dev` | `cluster/`, `platform/` | `hashi-platform-dev`, `hashi-platform-dev-platform` | `dev` |
-| `staging` | `cluster/`, `platform/` | `hashi-platform-staging`, `hashi-platform-staging-platform` | `staging` |
-| `production` | `cluster/`, `platform/` | `hashi-platform-production`, `hashi-platform-production-platform` | `production` |
+| `main` | `cluster/`, `platform/` | `hashi-platform-dev`, `hashi-platform-dev-platform` | `dev` |
 
-Changes flow dev → staging → production by pull request between the branches.
-Each root module names its workspace in `terraform.tf`, so the branch alone
-decides where a run lands. `dev` and `staging` are ephemeral and are torn
-down when they are promoted or left idle; see
-[Ephemeral environments](#ephemeral-environments).
+`main` is the only long-lived branch. Feature branches merge into it by pull
+request; the merge applies. Each root module names its workspace in
+`terraform.tf`. The environment is ephemeral and is torn down when it is left
+idle; see [Ephemeral environments](#ephemeral-environments).
 
 ## Prerequisites
 
@@ -128,31 +123,30 @@ that writes a kubeconfig entry.
 
 ## CI/CD
 
-Three workflows in `.github/workflows` drive the pipeline. They derive the
-environment from the branch and the layers from which
-`infra/environments/<env>/<layer>/main.tf` files exist; a missing layer is
+Three workflows in `.github/workflows` drive the pipeline. They target the
+single `dev` environment and derive the layers from which
+`infra/environments/dev/<layer>/main.tf` files exist; a missing layer is
 skipped with a notice. Whether the platform layer can run is decided by
 asking HCP Terraform (through the composite action
 `.github/actions/hcp-workspace-state`) whether the cluster workspace holds
 resources.
 
-**`terraform-plan.yml`** runs on pull requests into `dev`, `staging` or
-`production`:
+**`terraform-plan.yml`** runs on pull requests into `main`:
 
 1. `terraform fmt -check`, `tflint`, `terraform validate` and
    `terraform test` for every module, and `terraform validate` for each
-   layer of the target environment; Sentinel policy tests.
+   layer; Sentinel policy tests.
 2. A speculative plan in HCP Terraform per layer. The platform layer is only
    planned once the cluster workspace holds resources. Each layer's result is
    posted as its own comment on the pull request (updated on every push) and
    in the job summary, with a link to the HCP run.
 
-**`terraform-apply.yml`** runs on pushes to those branches (so, on merge) and
-on manual dispatch:
+**`terraform-apply.yml`** runs on pushes to `main` (so, on merge) and on
+manual dispatch:
 
 1. `terraform plan -out=tfplan` for the cluster layer, which creates an
    applyable run in HCP Terraform.
-2. One job bound to the GitHub environment of the same name, so required
+2. One job bound to the `dev` GitHub environment, so required
    reviewers and wait timers configured there gate everything below: it
    applies exactly the saved cluster plan (skipped when that plan had no
    changes), then plans and applies the platform layer back to back. The
@@ -161,88 +155,58 @@ on manual dispatch:
    The job runs whenever the cluster plan has changes or a platform layer
    exists, so platform-only changes still deploy.
 
-**`terraform-destroy.yml`** runs when a promotion pull request is merged
-(`dev → staging` destroys dev, `staging → production` destroys staging) and
-on manual dispatch for dev or staging. It checks out the environment's own
-branch and destroys the platform layer first, then the cluster layer, as
-remote runs bound to that environment's GitHub environment and sharing the
-apply workflow's concurrency group. If the platform destroy fails the job
-stops and the cluster stays; if the cluster workspace holds no resources the
-platform destroy is skipped with a warning. The dispatch form offers
-`layer = platform` to rehearse a platform teardown alone. Production is
-never a target. Details under
+**`terraform-destroy.yml`** runs on manual dispatch only; type `dev` in the
+confirmation field to arm it. It destroys the platform layer first, then the
+cluster layer, as remote runs bound to the `dev` GitHub environment and
+sharing the apply workflow's concurrency group. If the platform destroy fails
+the job stops and the cluster stays; if the cluster workspace holds no
+resources the platform destroy is skipped with a warning. The dispatch form
+offers `layer = platform` to rehearse a platform teardown alone. Details under
 [Ephemeral environments](#ephemeral-environments).
 
 One-time setup:
 
-- **HCP Terraform**: two workspaces per environment in the `hashi-platform`
-  project, execution mode *remote*, Terraform version `~> 1.15.0`, auto-apply
-  off: `hashi-platform-<name>` with **working directory
-  `infra/environments/<name>/cluster`** and `hashi-platform-<name>-platform`
-  with **working directory `infra/environments/<name>/platform`**. The working
+- **HCP Terraform**: two workspaces in the `hashi-platform` project,
+  execution mode *remote*, Terraform version `~> 1.15.0`, auto-apply off:
+  `hashi-platform-dev` with **working directory
+  `infra/environments/dev/cluster`** and `hashi-platform-dev-platform`
+  with **working directory `infra/environments/dev/platform`**. The working
   directory matters: without it the CLI uploads only the root folder and
   remote runs fail with "Unreadable module directory" because
   `../../../modules` is missing. With it, the CLI uploads the whole repository
   and runs in the subdirectory. On the cluster workspace enable **remote state
-  sharing** with its platform workspace. On dev and staging set
+  sharing** with its platform workspace. Set
   `auto-destroy-activity-duration` to `1d` on the platform workspace and `2d`
   on the cluster workspace, so the platform layer is always torn down first.
-  Create a team (for example `ci`) with *plan* and *apply* on all workspaces
+  Create a team (for example `ci`) with *plan* and *apply* on both workspaces
   and generate a team token for it.
 - **GitHub secret** `TF_API_TOKEN` (repository level) holding that team token.
   The pull request plan job runs outside any GitHub environment, so the token
-  must be available at repository level. For tighter control, add
-  environment-level `TF_API_TOKEN` secrets with per-environment team tokens;
-  the apply job picks those up automatically.
-- **GitHub environments** `dev`, `staging`, `production`. Add required
-  reviewers to `staging` and `production`, and restrict each environment to
-  its branch.
-- **Branch protection** on the three branches: require a pull request and
-  the `Static checks` and `Plan <environment>` status checks.
+  must be available at repository level. For tighter control, add an
+  environment-level `TF_API_TOKEN` secret on `dev`; the apply job picks it up
+  automatically.
+- **GitHub environment** `dev`. Add required reviewers there if applies should
+  wait for approval, and restrict the environment to `main`.
+- **Branch protection** on `main`: require a pull request and the
+  `Static checks` and `Plan dev` status checks.
 
 If a reviewer rejects an apply, the HCP Terraform run stays in
 *planned and saved*; discard it from the HCP Terraform UI so it does not
 linger in the workspace's run list.
 
-### Rolling the layered layout to a branch
+## Ephemeral environment
 
-The `cluster/` and `platform/` layout reaches each environment branch by
-promotion. Because the HCP workspace's working directory must match the
-branch content, switch it at the same time:
+`dev` exists only while something is being tested there. Two mechanisms keep
+it from running up a bill:
 
-1. Immediately before merging the promotion pull request into the branch,
-   set the cluster workspace's working directory to
-   `infra/environments/<env>/cluster`. Do not push to that branch in
-   between. (Done for `dev`; pending for `staging` and `production`.)
-2. The `-platform` workspaces already exist with their working directories,
-   remote state sharing from the cluster workspace, and auto-destroy `1d` on
-   dev and staging.
-3. Merge. The cluster layer plans with no changes; the platform layer then
-   installs the add-ons.
-
-## Ephemeral environments
-
-`dev` and `staging` exist only while something is being tested there;
-`production` is permanent. Two mechanisms keep the short-lived ones from
-running up a bill:
-
-- **Destroyed on promotion.** Merging `dev → staging` destroys dev, merging
-  `staging → production` destroys staging. The `terraform-destroy.yml`
-  workflow reacts to the merged pull request, checks out the environment's own
-  branch and runs `terraform destroy` as a remote run in HCP Terraform. It is
-  bound to the environment's GitHub environment, so staging's required
-  reviewers gate its teardown, and it shares the apply workflow's concurrency
-  group, so a push that lands during the destroy queues and recreates the
-  environment afterwards. The destroy and the promoted environment's apply run
-  in parallel; they touch different workspaces.
-- **Destroyed after a day without runs.** The dev and staging workspaces have
-  `auto-destroy-activity-duration = 1d`. HCP Terraform queues a destroy run
-  itself once a workspace has been idle for a day, which covers abandoned
-  branches and failed destroy workflows. Raise it in the workspace settings if
-  a test has to survive a weekend.
-- **Manual teardown.** Run the *Terraform destroy* workflow by hand, pick the
-  environment and type its name again to confirm. Production is not offered.
-- **Recreation.** The next push to the branch, or a manual run of *Terraform
+- **Destroyed after a day without runs.** The dev workspaces have
+  `auto-destroy-activity-duration` (`1d` platform, `2d` cluster). HCP
+  Terraform queues a destroy run itself once a workspace has been idle,
+  which covers forgotten environments and failed destroy workflows. Raise it
+  in the workspace settings if a test has to survive a weekend.
+- **Manual teardown.** Run the *Terraform destroy* workflow by hand and type
+  `dev` to confirm.
+- **Recreation.** The next push to `main`, or a manual run of *Terraform
   apply*, rebuilds the environment from scratch. Expect 15 to 20 minutes each
   way for an EKS cluster.
 
@@ -252,8 +216,7 @@ Rules that keep destroys clean:
   services, EBS volumes from persistent volume claims) must be gone before the
   platform layer is destroyed, because Terraform uninstalls the load balancer
   controller with it. Workloads must clean up after themselves:
-  `LoadBalancer` services are deleted with the app, and StatefulSets in
-  ephemeral environments set
+  `LoadBalancer` services are deleted with the app, and StatefulSets set
   `persistentVolumeClaimRetentionPolicy.whenDeleted: Delete`. Anything created
   by hand with `kubectl` is invisible to Terraform and blocks the VPC destroy;
   CI has no AWS credentials to clean it up.
@@ -267,7 +230,7 @@ Rules that keep destroys clean:
   billing until someone notices.
 - A saved plan left in the workspace from before the destroy refers to
   infrastructure that no longer exists; discard it in HCP Terraform.
-- Dev schedules its cluster KMS key for deletion after the minimum 7 days
+- The cluster KMS key is scheduled for deletion after the minimum 7 days
   (`kms_key_deletion_window_in_days` on the cluster module) so rebuilt
   clusters do not accumulate keys pending deletion.
 
@@ -283,6 +246,8 @@ effect once they land on the branch the set follows. See the
 
 ## Adding an environment
 
+The repository deliberately runs a single environment. To add a second one:
+
 1. Create both HCP Terraform workspaces (`hashi-platform-<name>` with working
    directory `infra/environments/<name>/cluster`, `hashi-platform-<name>-platform`
    with `infra/environments/<name>/platform`), enable remote state sharing
@@ -293,17 +258,12 @@ effect once they land on the branch the set follows. See the
    cluster workspace.
 4. In each layer's `locals.tf`, set `environment`.
 5. Rename `dev.tfvars` to `<name>.tfvars` in both layers, choose a VPC CIDR
-   that does not overlap with other environments (dev `10.0.0.0/16`, staging
-   `10.1.0.0/16`, production `10.2.0.0/16`) and size the node groups. For
-   production, also set `single_nat_gateway = false` on the network module.
+   that does not overlap with dev (`10.0.0.0/16`) and size the node groups.
 6. Add `!infra/environments/<name>/*/<name>.tfvars` to the root `.gitignore`,
-   next to the existing exceptions.
-7. Add the branch name to the `branches` lists in `terraform-plan.yml` and
-   `terraform-apply.yml`.
-8. If the environment is ephemeral, set `auto-destroy-activity-duration`
-   (`1d` platform, `2d` cluster), pass `kms_key_deletion_window_in_days = 7`
-   to the cluster module, and add its promotion pair and dispatch option to
-   `terraform-destroy.yml`.
+   next to the existing exception.
+7. Parameterise the `ENVIRONMENT` variable in `terraform-plan.yml`,
+   `terraform-apply.yml` and `terraform-destroy.yml`, which currently hard-code
+   `dev`, and decide how a run picks between the environments.
 
 ## Testing the modules
 

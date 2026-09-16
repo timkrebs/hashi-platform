@@ -15,8 +15,6 @@ body:
         - aws-vpc module
         - aws-eks-cluster module
         - dev environment
-        - staging environment
-        - production environment
         - CI workflows
         - Documentation
     validations:

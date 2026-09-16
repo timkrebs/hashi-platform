@@ -2,12 +2,6 @@
 
 <!-- What changes and why. Link the issue if there is one: Closes #123 -->
 
-## Target
-
-- [ ] `dev` (feature work)
-- [ ] `staging` (promotion from `dev`)
-- [ ] `production` (promotion from `staging`)
-
 ## Type of change
 
 - [ ] Module change (`infra/modules/**`)

@@ -46,21 +46,17 @@ locally; runs execute remotely.
 
 ## Branching model
 
-| Branch | Purpose |
-| --- | --- |
-| `dev` | Integration branch. All feature work lands here. Ephemeral: destroyed when promoted to `staging` or after a day without runs. |
-| `staging` | Promotion target from `dev`. Ephemeral: destroyed when promoted to `production` or after a day without runs. |
-| `production` | Promotion target from `staging`. Permanent. |
+`main` is the only long-lived branch, and it deploys the single `dev`
+environment.
 
-1. Branch from `dev`: `git switch -c feat/aws-eks-cluster-spot-groups dev`.
-2. Open a pull request into `dev`. CI runs the static checks and posts a
-   speculative plan for the dev environment on the PR.
-3. After review and merge, CI plans and applies to the dev workspace.
-4. Maintainers promote by opening pull requests `dev → staging` and
-   `staging → production`. Those applies wait for the reviewers configured on
-   the GitHub environment.
+1. Branch from `main`: `git switch -c feat/aws-eks-cluster-spot-groups main`.
+2. Open a pull request into `main`. CI runs the static checks and posts a
+   speculative plan for each layer on the PR.
+3. After review and merge, CI plans and applies to the dev workspaces. The
+   apply waits for whatever reviewers are configured on the `dev` GitHub
+   environment.
 
-Never push directly to the three environment branches.
+Never push directly to `main`.
 
 ## Commit messages
 
@@ -114,14 +110,8 @@ Before you mark a pull request ready for review:
 - [ ] `CHANGELOG.md` has an entry under **Unreleased**.
 - [ ] Workflow changes pass `actionlint`.
 
-Pull requests are squash-merged. The `Static checks` and `Plan <environment>`
-status checks are required on all three environment branches.
-
-## Adding a new environment
-
-Follow the steps in the [infra README](infra/README.md#adding-an-environment).
-A new environment touches the HCP Terraform organisation, GitHub environments
-and both workflows, so coordinate it with a maintainer first.
+Pull requests are squash-merged. The `Static checks` and `Plan dev` status
+checks are the ones to require on `main`.
 
 ## Reporting security issues
 

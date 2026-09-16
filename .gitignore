@@ -18,8 +18,6 @@ override.tf.json
 *.tfvars
 *.tfvars.json
 !infra/environments/dev/*/dev.tfvars
-!infra/environments/staging/*/staging.tfvars
-!infra/environments/production/*/production.tfvars
 
 # Terraform CLI configuration (may contain tokens)
 .terraformrc

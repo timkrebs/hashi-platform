@@ -4,5 +4,5 @@
 *                                   @timkrebs
 
 /infra/modules/                     @timkrebs
-/infra/environments/production/     @timkrebs
+/infra/environments/                @timkrebs
 /.github/                           @timkrebs

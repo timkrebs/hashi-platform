@@ -1,39 +1,28 @@
-# Tears down an ephemeral environment (dev or staging) in HCP Terraform,
-# platform layer first, then the cluster layer.
+# Tears down the dev environment in HCP Terraform, platform layer first, then
+# the cluster layer.
 #
-# Runs automatically when a promotion pull request is merged:
-#   dev     -> staging      destroys dev
-#   staging -> production   destroys staging
-# and on demand through "Run workflow" for dev or staging. Production is never
-# a target.
+# Manual only: "Run workflow", then type `dev` to confirm. There is one
+# environment, so no promotion flow can trigger a teardown by itself.
 #
-# The destroy job is bound to the GitHub environment of the branch being
-# destroyed, so staging's required reviewers gate it, and it shares the apply
-# workflow's concurrency group, so a push that lands during the destroy queues
-# behind it and recreates the environment afterwards.
+# The destroy job is bound to the "dev" GitHub environment, so any protection
+# rules configured there gate it, and it shares the apply workflow's
+# concurrency group, so a push that lands during the destroy queues behind it
+# and recreates the environment afterwards.
 #
 # Order matters: the platform layer is destroyed first, so the AWS objects
 # in-cluster workloads created (NLBs, EBS volumes) can still be cleaned up
 # while the load balancer controller runs. If the platform destroy fails, the
 # job stops and the cluster is left in place.
 #
-# HCP Terraform additionally destroys idle dev and staging workspaces
+# HCP Terraform additionally destroys the workspaces once they go idle
 # (auto-destroy-activity-duration: platform 1d, cluster 2d).
 name: Terraform destroy
 
 on:
-  pull_request:
-    types: [closed]
-    branches: [staging, production]
   workflow_dispatch:
     inputs:
-      environment:
-        description: Environment to destroy
-        type: choice
-        required: true
-        options: [dev, staging]
       confirm:
-        description: Type the environment name again to confirm
+        description: Type "dev" to confirm the teardown
         type: string
         required: true
       layer:
@@ -47,76 +36,35 @@ permissions:
   contents: read
 
 env:
+  ENVIRONMENT: dev
+  CLUSTER_DIR: infra/environments/dev/cluster
+  PLATFORM_DIR: infra/environments/dev/platform
   TERRAFORM_VERSION: "~> 1.15.0"
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
 
 jobs:
-  resolve:
-    name: Resolve environment
-    runs-on: ubuntu-latest
-    outputs:
-      environment: ${{ steps.env.outputs.environment }}
-    steps:
-      - id: env
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          MERGED: ${{ github.event.pull_request.merged }}
-          BASE_REF: ${{ github.base_ref }}
-          HEAD_REF: ${{ github.head_ref }}
-          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-          THIS_REPO: ${{ github.repository }}
-          INPUT_ENVIRONMENT: ${{ inputs.environment }}
-          INPUT_CONFIRM: ${{ inputs.confirm }}
-        run: |
-          environment=""
-          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
-            if [ "${INPUT_CONFIRM}" != "${INPUT_ENVIRONMENT}" ]; then
-              echo "::error::Confirmation '${INPUT_CONFIRM}' does not match the environment '${INPUT_ENVIRONMENT}'."
-              exit 1
-            fi
-            environment="${INPUT_ENVIRONMENT}"
-          elif [ "${MERGED}" = "true" ] && [ "${HEAD_REPO}" = "${THIS_REPO}" ]; then
-            case "${BASE_REF}:${HEAD_REF}" in
-              staging:dev)        environment="dev" ;;
-              production:staging) environment="staging" ;;
-            esac
-          fi
-
-          case "${environment}" in
-            dev|staging)
-              echo "Promotion detected; ${environment} will be destroyed."
-              ;;
-            "")
-              echo "::notice::Not a promotion merge (${HEAD_REF} -> ${BASE_REF}); nothing to destroy."
-              ;;
-            *)
-              echo "::error::Refusing to destroy '${environment}'."
-              exit 1
-              ;;
-          esac
-          echo "environment=${environment}" >> "$GITHUB_OUTPUT"
-
   destroy:
-    name: Destroy ${{ needs.resolve.outputs.environment }}
+    name: Destroy dev
     runs-on: ubuntu-latest
-    needs: resolve
-    if: needs.resolve.outputs.environment != ''
     environment:
-      name: ${{ needs.resolve.outputs.environment }}
+      name: dev
     concurrency:
-      group: terraform-apply-${{ needs.resolve.outputs.environment }}
+      group: terraform-apply-dev
       cancel-in-progress: false
     env:
-      ENVIRONMENT: ${{ needs.resolve.outputs.environment }}
-      CLUSTER_DIR: infra/environments/${{ needs.resolve.outputs.environment }}/cluster
-      PLATFORM_DIR: infra/environments/${{ needs.resolve.outputs.environment }}/platform
       LAYER_SELECTION: ${{ inputs.layer || 'all' }}
     steps:
-      # Destroy with the configuration that was applied: the environment's own branch.
+      - name: Check confirmation
+        env:
+          INPUT_CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "${INPUT_CONFIRM}" != "${ENVIRONMENT}" ]; then
+            echo "::error::Confirmation '${INPUT_CONFIRM}' does not match '${ENVIRONMENT}'."
+            exit 1
+          fi
+
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.resolve.outputs.environment }}
 
       - id: config
         name: Check configuration
@@ -127,7 +75,7 @@ jobs:
               echo "${layer}_ready=true" >> "$GITHUB_OUTPUT"
             else
               echo "${layer}_ready=false" >> "$GITHUB_OUTPUT"
-              echo "::notice::${directory}/main.tf does not exist on branch ${ENVIRONMENT}; the ${layer} layer is skipped."
+              echo "::notice::${directory}/main.tf does not exist; the ${layer} layer is skipped."
             fi
           done
 
@@ -136,7 +84,7 @@ jobs:
       - id: cluster_state
         uses: ./.github/actions/hcp-workspace-state
         with:
-          workspace: hashi-platform-${{ needs.resolve.outputs.environment }}
+          workspace: hashi-platform-${{ env.ENVIRONMENT }}
           token: ${{ secrets.TF_API_TOKEN }}
 
       - uses: hashicorp/setup-terraform@v4

@@ -16,21 +16,19 @@ for the modules once they are tagged.
   (capacity type, labels, taints), additional add-ons, EBS CSI driver with
   IRSA, input validation and plan-mode unit tests.
 - `dev` environment root composing both modules against the
-  `hashi-platform-dev` HCP Terraform workspace.
+  `hashi-platform-dev` HCP Terraform workspace, driven from `main`.
 - GitHub Actions pipeline: static checks and speculative plan on pull
   requests, saved-plan apply behind environment protection on merge.
 - Sentinel policy set under `infra/policies`: `require-mandatory-tags`
   (Environment, Project, ManagedBy on every taggable AWS resource) and
   `restrict-compute-size` (no instance type larger than medium), both
   hard-mandatory, with unit tests run in CI.
-- Ephemeral dev and staging: `terraform-destroy.yml` destroys the source
-  environment when a promotion pull request is merged (or on manual
-  dispatch), and the dev and staging workspaces auto-destroy after one day
-  without runs.
+- Ephemeral dev: `terraform-destroy.yml` tears the environment down on manual
+  dispatch, and the dev workspaces auto-destroy after a day without runs.
 - `aws-eks-cluster` input `kms_key_deletion_window_in_days` (default 30);
   dev uses the 7-day minimum.
-- Platform layer per environment (`infra/environments/<env>/platform`,
-  workspace `hashi-platform-<env>-platform`): AWS Load Balancer Controller and
+- Platform layer (`infra/environments/dev/platform`, workspace
+  `hashi-platform-dev-platform`): AWS Load Balancer Controller and
   cert-manager. New modules with unit tests:
   `aws-load-balancer-controller`, `cert-manager`, `boundary` (placeholder).
 - Composite action `hcp-workspace-state` and a shared plan-report script for
@@ -56,11 +54,17 @@ for the modules once they are tagged.
   workflow applies the saved cluster plan and then plans and applies the
   platform layer inside the same approved job; the destroy workflow tears
   down platform before cluster and stops on failure.
-- Staging VPC CIDR changed to `10.1.0.0/16`; cluster workspaces of ephemeral
-  environments auto-destroy after 2 days, platform workspaces after 1 day.
+- The cluster workspace auto-destroys after 2 days, the platform workspace
+  after 1, so the platform layer is always torn down first.
 
 ### Removed
 
+- The `staging` and `production` environments (`infra/environments/staging`,
+  `infra/environments/production`) and their HCP Terraform workspaces from the
+  pipeline. The repository now runs a single `dev` environment.
+- The branch-per-environment model. `main` is the only long-lived branch; the
+  workflows trigger on it and target `dev` directly, and the promotion-driven
+  destroy trigger is gone (the destroy workflow is manual dispatch only).
 - Argo CD from the platform layer: the `argocd` and `argocd-root-app` modules,
   their module blocks, outputs and the in-cluster secret bridge
   (`hashi-platform.io/*` annotations) in all three environments. Nothing in

@@ -29,8 +29,8 @@ Out of scope, please report upstream instead:
 
 ## Supported versions
 
-Only the current heads of the `dev`, `staging` and `production` branches are
-supported. There are no tagged releases at this time.
+Only the current head of the `main` branch is supported. There are no tagged
+releases at this time.
 
 ## Handling of secrets
 

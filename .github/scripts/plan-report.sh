@@ -25,7 +25,7 @@ else
 fi
 
 {
-  echo "<!-- terraform-plan:${ENVIRONMENT}:${LAYER} -->"
+  echo "<!-- terraform-plan:${LAYER} -->"
   echo "### ${icon} Terraform plan for \`${ENVIRONMENT}\` / \`${LAYER}\`"
   echo
   echo "**${status_line}**"

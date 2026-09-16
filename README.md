@@ -17,9 +17,9 @@ pull requests and applies on merge.
 - **`aws-eks-cluster`**: an EKS control plane with typed managed node groups
   (on-demand or spot, labels, taints), add-ons, and the EBS CSI driver wired up
   with IRSA.
-- **Environments as roots**: `dev`, `staging` and `production` each compose
-  the modules with their own sizing and CIDRs, backed by their own HCP
-  Terraform workspace.
+- **Environment as root**: a single `dev` environment composes the modules
+  with its own sizing and CIDRs, backed by its own HCP Terraform workspaces
+  (one per layer).
 - **A pipeline you can trust**: format, lint, validate and unit tests on every
   pull request, a speculative plan posted on the PR, and an apply of exactly
   that saved plan behind GitHub environment approvals.
@@ -31,8 +31,8 @@ pull requests and applies on merge.
 
 ```mermaid
 flowchart LR
-  pr[Pull request or push<br/>to dev / staging / production] --> gha[GitHub Actions<br/>fmt · tflint · validate · test]
-  gha -->|terraform plan / apply| hcp[HCP Terraform<br/>one workspace per environment]
+  pr[Pull request or push<br/>to main] --> gha[GitHub Actions<br/>fmt · tflint · validate · test]
+  gha -->|terraform plan / apply| hcp[HCP Terraform<br/>one workspace per layer]
   hcp --> aws
   subgraph aws[AWS account]
     vpc[aws-vpc<br/>VPC · subnets · NAT] --> eks[aws-eks-cluster<br/>EKS · node groups · EBS CSI]
@@ -50,9 +50,9 @@ flowchart LR
 │   │   └── aws-eks-cluster/ # cluster module (+ unit tests)
 │   ├── policies/            # Sentinel policy set for HCP Terraform (+ tests)
 │   └── environments/
-│       └── <env>/           # dev, staging, production
-│           ├── cluster/     # network + EKS       → workspace hashi-platform-<env>
-│           └── platform/    # cluster add-ons     → workspace hashi-platform-<env>-platform
+│       └── dev/             # the only environment
+│           ├── cluster/     # network + EKS       → workspace hashi-platform-dev
+│           └── platform/    # cluster add-ons     → workspace hashi-platform-dev-platform
 ├── .tflint.hcl              # shared lint rules
 ├── .pre-commit-config.yaml  # local checks mirroring CI
 └── Makefile                 # fmt, lint, validate, test, plan
@@ -87,19 +87,16 @@ make plan ENV=dev
 The module unit tests run in plan mode against mocked providers, so `make test`
 needs no AWS credentials.
 
-## Branches and environments
+## Branch and environment
 
-| Branch | Roots under `infra/environments/<env>/` | HCP Terraform workspaces |
+| Branch | Roots under `infra/environments/dev/` | HCP Terraform workspaces |
 | --- | --- | --- |
-| `dev` | `cluster/`, `platform/` | `hashi-platform-dev`, `hashi-platform-dev-platform` |
-| `staging` | `cluster/`, `platform/` | `hashi-platform-staging`, `hashi-platform-staging-platform` |
-| `production` | `cluster/`, `platform/` | `hashi-platform-production`, `hashi-platform-production-platform` |
+| `main` | `cluster/`, `platform/` | `hashi-platform-dev`, `hashi-platform-dev-platform` |
 
-Feature work goes into `dev` by pull request; promotion is a pull request from
-`dev` to `staging` and from `staging` to `production`. Merging applies, and
-promoting an environment destroys the one it came from: `dev` and `staging`
-are ephemeral, torn down on promotion or after a day without runs, while
-`production` is permanent.
+`main` is the only long-lived branch. Feature work merges into it by pull
+request, and merging applies to the `dev` environment. That environment is
+ephemeral: it is torn down by the manual destroy workflow, or automatically
+after a day without runs.
 
 ## Contributing
 
