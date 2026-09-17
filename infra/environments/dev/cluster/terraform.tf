@@ -12,19 +12,19 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.47.0"
+      version = "~> 6.64.0"
     }
 
     # Used transitively by terraform-aws-modules/eks. Pinned here so the root
     # lock file controls their versions.
     tls = {
       source  = "hashicorp/tls"
-      version = "~> 4.0.5"
+      version = "~> 4.4.1"
     }
 
     cloudinit = {
       source  = "hashicorp/cloudinit"
-      version = "~> 2.3.4"
+      version = "~> 2.4.1"
     }
 
     time = {
