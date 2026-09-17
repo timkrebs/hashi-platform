@@ -27,7 +27,7 @@ use_hardened_node_ami = false
 node_groups = {
   default = {
     instance_types = ["t3.small"]
-    min_size       = 1
+    min_size       = 3
     max_size       = 4
     desired_size   = 3
   }
