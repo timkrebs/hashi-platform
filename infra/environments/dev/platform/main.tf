@@ -107,3 +107,31 @@ resource "kubernetes_service_account_v1" "vault_init" {
     }
   }
 }
+
+# EKS ships a legacy gp2 class backed by the in-tree provisioner
+# kubernetes.io/aws-ebs, which Kubernetes removed in 1.31 -- on 1.35 it
+# provisions nothing. The aws-ebs-csi-driver addon brings no StorageClass of its
+# own, so without this every PersistentVolumeClaim stays Pending and anything
+# with state (Vault's raft and audit volumes) never schedules.
+resource "kubernetes_storage_class_v1" "gp3" {
+  count = var.create_default_storage_class ? 1 : 0
+
+  metadata {
+    name = "gp3"
+
+    annotations = {
+      "storageclass.kubernetes.io/is-default-class" = "true"
+    }
+  }
+
+  storage_provisioner = "ebs.csi.aws.com"
+  reclaim_policy      = "Delete"
+  # Bind only once a pod is scheduled, so the volume lands in the same zone.
+  volume_binding_mode    = "WaitForFirstConsumer"
+  allow_volume_expansion = true
+
+  parameters = {
+    type      = "gp3"
+    encrypted = "true"
+  }
+}

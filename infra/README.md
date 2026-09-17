@@ -145,6 +145,13 @@ configuration needs no entry for it. The license only loads on the Enterprise
 image, which is why the values pin `hashicorp/vault-enterprise:<version>-ent`
 rather than `hashicorp/vault`.
 
+Vault's raft and audit volumes need a working StorageClass. EKS ships a `gp2`
+class backed by the in-tree provisioner `kubernetes.io/aws-ebs`, which
+Kubernetes removed in 1.31, and the EBS CSI addon brings none of its own — so
+the platform layer creates an encrypted `gp3` class on `ebs.csi.aws.com` and
+marks it default (`create_default_storage_class`). Without it every claim stays
+`Pending` and the Vault pods never schedule.
+
 After the first start the cluster still has to be initialised and unsealed
 once, and an audit device enabled — `auditStorage` only provisions the volume.
 

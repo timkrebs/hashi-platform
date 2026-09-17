@@ -79,3 +79,9 @@ variable "vault_init_secret_recovery_window_in_days" {
     error_message = "vault_init_secret_recovery_window_in_days must be 0 or between 7 and 30."
   }
 }
+
+variable "create_default_storage_class" {
+  description = "Create an encrypted gp3 StorageClass backed by the EBS CSI driver and mark it default. The gp2 class EKS ships uses the in-tree provisioner that Kubernetes removed in 1.31, so without this nothing with a PersistentVolumeClaim can schedule."
+  type        = bool
+  default     = true
+}

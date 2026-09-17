@@ -68,6 +68,10 @@ for the modules once they are tagged.
   output. The platform layer also creates the Vault namespace and its service
   accounts, because the IRSA annotation carries the AWS account ID and this
   repository is public.
+- Default encrypted `gp3` StorageClass on `ebs.csi.aws.com`
+  (`create_default_storage_class`). The `gp2` class EKS ships uses the in-tree
+  provisioner Kubernetes removed in 1.31, and the EBS CSI addon ships no class
+  of its own, so every PersistentVolumeClaim stayed `Pending`.
 - Vault TLS is issued by cert-manager from `gitops/manifests/vault-pki`. The
   certificate covers `*.vault-internal` so Raft peers can verify each other.
 - Composite action `hcp-workspace-state` and a shared plan-report script for

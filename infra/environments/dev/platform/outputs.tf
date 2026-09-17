@@ -62,3 +62,8 @@ output "vault_license_secret_command" {
   description = "Creates the Enterprise license secret. Run it out of band: the licence must never be committed to this public repository."
   value       = "kubectl create secret generic vault-ent-license --namespace ${var.vault_namespace} --from-file=license=vault.hclic"
 }
+
+output "default_storage_class" {
+  description = "Name of the default StorageClass, or null when it is not managed here."
+  value       = one(kubernetes_storage_class_v1.gp3[*].metadata[0].name)
+}
