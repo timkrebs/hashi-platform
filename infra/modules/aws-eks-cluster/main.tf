@@ -1,6 +1,48 @@
 data "aws_partition" "current" {}
 
+# The company's hardened EKS image. Its Kubernetes version is part of the name,
+# so deriving the name from cluster_version makes it impossible for the node
+# image to drift from the control plane: if no image is published for this
+# version, the plan fails here rather than producing nodes that cannot join.
+data "aws_ami" "hardened_node" {
+  count = var.use_hardened_node_ami ? 1 : 0
+
+  most_recent = true
+  owners      = [var.node_ami_owner]
+
+  filter {
+    name   = "name"
+    values = ["hc-base-ubuntu-2404-eks-${var.cluster_version}-${var.node_ami_architecture}-*"]
+  }
+
+  filter {
+    name   = "state"
+    values = ["available"]
+  }
+}
+
 locals {
+  hardened_node_ami_id = one(data.aws_ami.hardened_node[*].id)
+
+  # One flat object, not a conditional one: branching at the object level forces
+  # both branches to a single type and collapses enable_bootstrap_user_data into
+  # the string "true".
+  #
+  # ami_id is "" rather than null when the hardened image is off, because
+  # upstream keys off `ami_id != ""` to decide whether a custom image is in play,
+  # and null would wrongly take that path. Upstream also sets the node group's
+  # ami_type to null itself once ami_id is set, letting the EKS API infer CUSTOM,
+  # so ami_type stays as configured here and is simply ignored in that case.
+  #
+  # enable_bootstrap_user_data matters: EKS injects no bootstrap for a custom
+  # image, so without it nodes launch and never join the cluster.
+  node_group_ami_defaults = {
+    ami_type                   = var.ami_type
+    ami_id                     = var.use_hardened_node_ami ? local.hardened_node_ami_id : ""
+    enable_bootstrap_user_data = var.use_hardened_node_ami
+    platform                   = "linux"
+  }
+
   node_groups = {
     for key, ng in var.node_groups : key => {
       name           = key
@@ -45,9 +87,7 @@ module "eks" {
     }
   })
 
-  eks_managed_node_group_defaults = {
-    ami_type = var.ami_type
-  }
+  eks_managed_node_group_defaults = local.node_group_ami_defaults
 
   eks_managed_node_groups = local.node_groups
 

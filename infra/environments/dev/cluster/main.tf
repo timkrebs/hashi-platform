@@ -26,6 +26,11 @@ module "eks" {
 
   node_groups = var.node_groups
 
+  # Compliance: run the nodes on the company's hardened EKS image. The image is
+  # selected by cluster_version, and one is only published for some versions, so
+  # this cannot be turned on until the control plane is on a version that has one.
+  use_hardened_node_ami = var.use_hardened_node_ami
+
   # Dev is ephemeral and rebuilt often; schedule the old secrets key for
   # deletion after the minimum window instead of the 30-day default.
   kms_key_deletion_window_in_days = 7

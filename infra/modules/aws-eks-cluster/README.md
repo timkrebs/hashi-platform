@@ -91,7 +91,10 @@ providers; Terraform resolves them automatically.
 | cluster_version                          | Kubernetes minor version, for example `"1.33"`                                                    | `string`             | `"1.33"`                                                             | no       |
 | cluster_endpoint_public_access           | Expose the API endpoint on the internet                                                           | `bool`               | `true`                                                               | no       |
 | enable_cluster_creator_admin_permissions | Grant the Terraform identity cluster-admin via an access entry                                   | `bool`               | `true`                                                               | no       |
-| ami_type                                 | AMI family for all node groups                                                                    | `string`             | `"AL2023_x86_64_STANDARD"`                                           | no       |
+| ami_type                                 | AMI family for all node groups, when the hardened image is off                                    | `string`             | `"AL2023_x86_64_STANDARD"`                                           | no       |
+| use_hardened_node_ami                    | Run node groups on the company's hardened EKS image                                               | `bool`               | `false`                                                              | no       |
+| node_ami_owner                           | Account publishing the hardened EKS image                                                         | `string`             | `"888995627335"`                                                     | no       |
+| node_ami_architecture                    | Architecture of the hardened EKS image (`amd64` or `arm64`)                                       | `string`             | `"amd64"`                                                            | no       |
 | kms_key_deletion_window_in_days          | Days KMS waits before deleting the secrets key after destroy (7-30); use 7 for ephemeral clusters | `number`             | `30`                                                                 | no       |
 | node_groups                              | Managed node groups keyed by short name (see schema below)                                       | `map(object({...}))` | one `default` group: `t3.medium`, min 1, max 3, desired 2            | no       |
 | cluster_addons                           | Additional add-ons keyed by name; `aws-ebs-csi-driver` is always managed by the module           | `map(object({...}))` | `{}`                                                                 | no       |
@@ -142,4 +145,32 @@ and IAM modules replaced by fixed outputs, so they need no AWS credentials:
 ```sh
 terraform init -backend=false
 terraform test
+```
+
+## Hardened node images
+
+Setting `use_hardened_node_ami = true` moves the managed node groups off the
+AWS-optimised AL2023 image and onto the company's hardened EKS image from the
+ami-prod account.
+
+The image name embeds its Kubernetes version
+(`hc-base-ubuntu-2404-eks-<version>-<arch>-*`), and the module derives that name
+from `cluster_version`. That is deliberate: Kubernetes forbids a node's kubelet
+being newer than the control plane, so tying the two together makes the drift
+impossible to express. If no image is published for the configured version the
+plan fails on the lookup, rather than creating nodes that silently never join.
+
+A custom image is not EKS-optimised, so the module also sets
+`enable_bootstrap_user_data`, which renders the node bootstrap into the launch
+template. EKS injects nothing of its own for custom images; without it the nodes
+boot and never register. Upstream sets the node group's `ami_type` to null once
+a custom `ami_id` is present and lets the EKS API infer `CUSTOM`, so `ami_type`
+is ignored in that case.
+
+Check which versions have an image before turning this on:
+
+```sh
+aws ec2 describe-images --owners 888995627335 \
+  --filters 'Name=name,Values=hc-base-ubuntu-2404-eks-*' \
+  --query 'Images[].Name' --output text | tr '\t' '\n' | sed -E 's/-[0-9]{14}$//' | sort -u
 ```

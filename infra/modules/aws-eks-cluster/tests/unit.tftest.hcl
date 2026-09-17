@@ -247,3 +247,106 @@ run "rejects_kms_deletion_window_outside_aws_range" {
 
   expect_failures = [var.kms_key_deletion_window_in_days]
 }
+
+# The AWS-optimised image stays the default, so existing clusters are untouched
+# until the hardened image is opted into explicitly.
+run "aws_optimised_image_is_the_default" {
+  command = plan
+
+  assert {
+    condition     = local.node_group_ami_defaults.ami_type == "AL2023_x86_64_STANDARD" && local.node_group_ami_defaults.ami_id == ""
+    error_message = "Node groups should use the AWS-optimised AL2023 image by default."
+  }
+
+  assert {
+    condition     = local.node_group_ami_defaults.enable_bootstrap_user_data == false
+    error_message = "EKS injects the bootstrap itself for its own images."
+  }
+
+  assert {
+    condition     = length(data.aws_ami.hardened_node) == 0 && output.node_ami_id == null
+    error_message = "The hardened image should not be looked up unless it is asked for."
+  }
+}
+
+# A custom AMI is not EKS-optimised, so the node group must be told the type is
+# CUSTOM and the module must render the bootstrap into user data. Without both,
+# nodes launch and never join the cluster.
+run "hardened_image_switches_the_node_group_to_custom" {
+  command = plan
+
+  variables {
+    use_hardened_node_ami = true
+    cluster_version       = "1.35"
+  }
+
+  # Upstream nulls the node group's ami_type once ami_id is set, so a non-empty
+  # ami_id is what actually puts the node group on the custom image.
+  assert {
+    condition     = local.node_group_ami_defaults.ami_id != "" && local.node_group_ami_defaults.ami_id != null
+    error_message = "The hardened image should be passed to the node group as a custom AMI."
+  }
+
+  assert {
+    condition     = local.node_group_ami_defaults.enable_bootstrap_user_data == true
+    error_message = "EKS does not inject bootstrap user data for custom images; the module must render it."
+  }
+
+  assert {
+    condition     = local.node_group_ami_defaults.platform == "linux"
+    error_message = "The hardened image is Ubuntu, so the linux bootstrap template applies."
+  }
+}
+
+# The image name carries its Kubernetes version, so deriving it from
+# cluster_version is what stops the node image drifting ahead of the control
+# plane, which Kubernetes forbids.
+run "hardened_image_is_selected_by_cluster_version" {
+  command = plan
+
+  variables {
+    use_hardened_node_ami = true
+    cluster_version       = "1.35"
+  }
+
+  assert {
+    condition     = anytrue([for f in one(data.aws_ami.hardened_node[*].filter) : contains(f.values, "hc-base-ubuntu-2404-eks-1.35-amd64-*")])
+    error_message = "The image family must be derived from cluster_version and the architecture."
+  }
+}
+
+run "hardened_image_honours_the_architecture" {
+  command = plan
+
+  variables {
+    use_hardened_node_ami = true
+    cluster_version       = "1.35"
+    node_ami_architecture = "arm64"
+  }
+
+  assert {
+    condition     = anytrue([for f in one(data.aws_ami.hardened_node[*].filter) : contains(f.values, "hc-base-ubuntu-2404-eks-1.35-arm64-*")])
+    error_message = "The architecture should select the matching hardened image."
+  }
+}
+
+run "rejects_an_unknown_node_ami_architecture" {
+  command = plan
+
+  variables {
+    use_hardened_node_ami = true
+    node_ami_architecture = "x86_64"
+  }
+
+  expect_failures = [var.node_ami_architecture]
+}
+
+run "rejects_a_malformed_node_ami_owner" {
+  command = plan
+
+  variables {
+    node_ami_owner = "ami-prod"
+  }
+
+  expect_failures = [var.node_ami_owner]
+}

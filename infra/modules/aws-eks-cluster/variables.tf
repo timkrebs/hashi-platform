@@ -52,7 +52,7 @@ variable "enable_cluster_creator_admin_permissions" {
 }
 
 variable "ami_type" {
-  description = "AMI family for all managed node groups. Amazon Linux 2 images are not published for Kubernetes 1.33 and later, so AL2023 is the default."
+  description = "AMI family for all managed node groups when use_hardened_node_ami is false. Amazon Linux 2 images are not published for Kubernetes 1.33 and later, so AL2023 is the default."
   type        = string
   default     = "AL2023_x86_64_STANDARD"
 
@@ -68,6 +68,34 @@ variable "ami_type" {
       "BOTTLEROCKET_ARM_64",
     ], var.ami_type)
     error_message = "ami_type must be one of the EKS managed node group AMI types (AL2023_x86_64_STANDARD, AL2023_ARM_64_STANDARD, AL2023_x86_64_NVIDIA, AL2_x86_64, AL2_x86_64_GPU, AL2_ARM_64, BOTTLEROCKET_x86_64, BOTTLEROCKET_ARM_64)."
+  }
+}
+
+variable "use_hardened_node_ami" {
+  description = "Run the managed node groups on the company's hardened EKS image instead of the AWS-optimised one. The image is selected by cluster_version, so a version with no published image fails the plan rather than producing nodes that cannot join."
+  type        = bool
+  default     = false
+}
+
+variable "node_ami_owner" {
+  description = "Account that publishes the hardened EKS image. Defaults to the company ami-prod account."
+  type        = string
+  default     = "888995627335"
+
+  validation {
+    condition     = can(regex("^[0-9]{12}$", var.node_ami_owner))
+    error_message = "node_ami_owner must be a 12-digit AWS account ID."
+  }
+}
+
+variable "node_ami_architecture" {
+  description = "Architecture of the hardened EKS image. It must match the instance types in node_groups."
+  type        = string
+  default     = "amd64"
+
+  validation {
+    condition     = contains(["amd64", "arm64"], var.node_ami_architecture)
+    error_message = "node_ami_architecture must be amd64 or arm64."
   }
 }
 

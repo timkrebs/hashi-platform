@@ -31,6 +31,31 @@ for the modules once they are tagged.
   `hashi-platform-dev-platform`): AWS Load Balancer Controller and
   cert-manager. New modules with unit tests:
   `aws-load-balancer-controller`, `cert-manager`, `boundary` (placeholder).
+- `aws-checkmk-server` module: Checkmk Raw Edition 2.4.0p36 on an Ubuntu 24.04
+  EC2 instance in a public subnet, with an elastic IP, an encrypted gp3 root
+  volume, IMDSv2-only metadata and SSM Session Manager access instead of an SSH
+  key pair. The package is verified against a pinned SHA256 at first boot, and
+  the interface is served over HTTPS with a self-signed certificate while port
+  80 redirects to 443.
+- The initial `cmkadmin` password is generated with `random_password`, stored as
+  an SSM `SecureString`, and read by the instance from SSM at boot through its
+  instance profile, so it never appears in user data. The `random` provider is
+  required again.
+- Platform layer wires the monitoring server behind `enable_checkmk`, with
+  `checkmk_instance_type` and `checkmk_allowed_cidr_blocks` inputs and outputs
+  for the URL, the elastic IP, the instance ID and the commands that read the
+  password and open a Session Manager shell.
+- `public_subnet_ids` and `vpc_cidr_block` added to the platform layer's remote
+  state `defaults`, so plans still work before the cluster workspace has state.
+- Hardened images from the company ami-prod account (`888995627335`) for
+  compliance. The Checkmk server runs on `hc-base-ubuntu-2404-amd64-*`, and
+  `aws-eks-cluster` gains `use_hardened_node_ami`, `node_ami_owner` and
+  `node_ami_architecture` to run managed node groups on
+  `hc-base-ubuntu-2404-eks-<version>-amd64-*`.
+- The EKS node image is selected by `cluster_version`, so it cannot drift ahead
+  of the control plane; a version with no published image fails the plan rather
+  than creating nodes that never join. Custom images also need
+  `enable_bootstrap_user_data`, because EKS injects no bootstrap for them.
 - Composite action `hcp-workspace-state` and a shared plan-report script for
   the workflows.
 - `.terraform-version` pinning Terraform to 1.15.9, so tenv and friends select
@@ -42,6 +67,11 @@ for the modules once they are tagged.
 - Contributor documentation: README, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY.
 
 ### Changed
+
+- Dev cluster moves to Kubernetes 1.34 as the first of three steps towards 1.35,
+  where the hardened EKS node image is published. EKS upgrades one minor version
+  per apply, and no hardened image exists for 1.34, so the nodes stay on AL2023
+  until the cluster reaches 1.35.
 
 - Replaced the copied EKS tutorial configuration (embedded provider, fixed
   CIDRs and node groups) with the two modules above.

@@ -22,6 +22,12 @@ variable "cluster_version" {
   default     = "1.36"
 }
 
+variable "use_hardened_node_ami" {
+  description = "Run the managed node groups on the company's hardened EKS image. Only turn this on once cluster_version matches a published hc-base-ubuntu-2404-eks-<version> image, otherwise the plan fails on the AMI lookup."
+  type        = bool
+  default     = false
+}
+
 variable "node_groups" {
   description = "Managed node groups for the cluster, keyed by a short name. See modules/aws-eks-cluster for the full schema."
   type = map(object({

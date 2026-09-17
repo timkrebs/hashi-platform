@@ -47,3 +47,8 @@ output "ebs_csi_irsa_role_arn" {
   description = "ARN of the IAM role assumed by the EBS CSI driver."
   value       = module.ebs_csi_irsa.iam_role_arn
 }
+
+output "node_ami_id" {
+  description = "AMI the managed node groups launch from, or null when the AWS-optimised image is used."
+  value       = local.hardened_node_ami_id
+}

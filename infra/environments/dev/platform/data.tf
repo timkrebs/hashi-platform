@@ -20,6 +20,8 @@ data "terraform_remote_state" "cluster" {
     cluster_certificate_authority_data = null
     oidc_provider_arn                  = null
     vpc_id                             = null
+    public_subnet_ids                  = null
+    vpc_cidr_block                     = null
   }
 }
 

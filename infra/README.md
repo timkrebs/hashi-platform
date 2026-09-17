@@ -14,6 +14,7 @@ infra/
 │   ├── aws-eks-cluster/               # EKS control plane, managed node groups, EBS CSI IRSA
 │   ├── aws-load-balancer-controller/  # NLB/ALB controller with IRSA (platform layer)
 │   ├── cert-manager/                  # certificates for in-cluster TLS (platform layer)
+│   ├── aws-checkmk-server/            # Checkmk Raw monitoring server on EC2 (platform layer)
 │   └── boundary/                      # HCP Boundary placeholder, disabled
 ├── policies/                          # Sentinel policy set evaluated by HCP Terraform
 └── environments/
@@ -29,10 +30,10 @@ There is one environment, `dev`, with two root modules applied in this order:
 1. **`cluster/`** builds the network and the EKS cluster from `aws-vpc` and
    `aws-eks-cluster`. Its outputs (API endpoint, CA, OIDC provider, VPC id,
    account id) reach the next layer through HCP Terraform remote state.
-2. **`platform/`** installs the in-cluster add-ons workloads depend on: the
-   AWS Load Balancer Controller (with IRSA) and cert-manager. Secrets are
-   served by HCP Vault Dedicated, which runs outside this configuration and is
-   not managed by Terraform here.
+2. **`platform/`** installs the in-cluster add-ons workloads depend on — the
+   AWS Load Balancer Controller (with IRSA) and cert-manager — plus the Checkmk
+   monitoring server on EC2. Secrets are served by HCP Vault Dedicated, which
+   runs outside this configuration and is not managed by Terraform here.
 
 ```hcl
 # environments/<env>/platform/main.tf (excerpt)
@@ -64,6 +65,55 @@ removed before the platform layer is destroyed; see
 The network and the cluster remain separate modules because they have
 different lifecycles. Dependencies flow through the root modules only;
 modules never reference each other directly.
+
+### Hardened node images
+
+Both EC2 estates run on the company's hardened images from the ami-prod account
+(`888995627335`) for compliance: the Checkmk server on
+`hc-base-ubuntu-2404-amd64-*`, and the EKS node groups on
+`hc-base-ubuntu-2404-eks-<version>-amd64-*`.
+
+The EKS image family is published per Kubernetes version, and the module derives
+the name from `cluster_version`, so the node image can never drift ahead of the
+control plane. Today only **1.35** has an image; there is none for 1.33 or 1.34.
+Since EKS upgrades one minor version per apply, moving a live cluster onto the
+hardened image is a sequence, not a single change:
+
+| Step | `cluster_version` | `use_hardened_node_ami` | What happens |
+| --- | --- | --- | --- |
+| 1 | `1.34` | `false` | Control plane 1.33 -> 1.34, nodes stay on AL2023. |
+| 2 | `1.35` | `false` | Control plane 1.34 -> 1.35, nodes still AL2023. |
+| 3 | `1.35` | `true` | Node groups roll onto the hardened image. |
+
+Each step is its own merge to `main`, and each rotates every node. Do not skip a
+step: EKS rejects a two-minor jump, and turning the flag on at a version with no
+published image fails the plan on the AMI lookup — by design, rather than
+producing nodes that never join the cluster.
+
+Kubernetes 1.33 is on extended support, which bills the control plane at roughly
+six times the standard rate, so this sequence also takes the cluster off that.
+
+### Monitoring
+
+The platform layer also runs a Checkmk Raw server on a single EC2 instance in a
+public subnet, installed and configured at first boot:
+
+```sh
+terraform output -raw checkmk_url                     # https://<eip>/cmk/
+eval "$(terraform output -raw checkmk_admin_password_command)"
+```
+
+The interface is open to the internet over HTTPS with a **self-signed**
+certificate, so browsers warn on the first visit; narrow
+`checkmk_allowed_cidr_blocks` in `dev.tfvars` where you can. Shell access is
+through SSM Session Manager, not SSH.
+
+Two consequences of it living in the platform layer are worth knowing. It only
+needs the VPC, yet the layer cannot plan at all without the EKS cluster, because
+`data.aws_eks_cluster_auth` reads a live cluster. And the workspace auto-destroys
+after a day without runs, which takes the monitoring history with it. If the
+server should outlive the cluster, move it to the `cluster/` layer, which has the
+VPC, no Kubernetes providers and a two-day window.
 
 ## Branch, environment and workspaces
 
@@ -295,7 +345,12 @@ tflint --recursive --config "$PWD/.tflint.hcl"
 | terraform-aws-modules/iam/aws (assumable-role-oidc, irsa-eks)     | 5.39.0  |
 | Helm chart eks/aws-load-balancer-controller                       | 3.5.0   |
 | Helm chart jetstack/cert-manager                                  | 1.21.1  |
+| Checkmk Raw Edition (.deb, Ubuntu 24.04 noble)                    | 2.4.0p36 |
+| Hardened base image (ami-prod `888995627335`)                     | latest  |
 
 These are pinned inside the modules. Bump them there and run the unit tests
-plus a plan in dev before rolling forward. Dependabot does not track Helm
-charts; bump them by hand.
+plus a plan in dev before rolling forward. Dependabot tracks neither Helm charts
+nor the Checkmk package; bump them by hand. Checkmk additionally pins the
+package checksum, which has to be refreshed from the `.hash` sidecar in the same
+change — see the
+[module README](modules/aws-checkmk-server/README.md#upgrading-checkmk).

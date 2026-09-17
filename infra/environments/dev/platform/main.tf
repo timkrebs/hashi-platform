@@ -17,3 +17,20 @@ module "cert_manager" {
   count  = var.enable_cert_manager ? 1 : 0
   source = "../../../modules/cert-manager"
 }
+
+# Checkmk monitoring. It only needs the VPC, but it lives here so it shares the
+# add-ons' lifecycle and is torn down with them.
+module "checkmk" {
+  count  = var.enable_checkmk ? 1 : 0
+  source = "../../../modules/aws-checkmk-server"
+
+  name      = "${local.project}-${local.environment}-checkmk"
+  region    = var.region
+  vpc_id    = local.cluster.vpc_id
+  subnet_id = local.checkmk_subnet_id
+
+  instance_type       = var.checkmk_instance_type
+  allowed_cidr_blocks = var.checkmk_allowed_cidr_blocks
+
+  tags = local.common_tags
+}
