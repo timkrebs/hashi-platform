@@ -20,13 +20,13 @@ az_count       = 3
 #   live 1.35  ->  cluster_version = "1.35", use_hardened_node_ami = true
 #
 # There is no hardened image for 1.34, so the flag stays false until 1.35.
-cluster_version = "1.34"
+cluster_version = "1.35"
 
-use_hardened_node_ami = false
+use_hardened_node_ami = true
 
 node_groups = {
   default = {
-    instance_types = ["t3.small"]
+    instance_types = ["t3.medium"]
     min_size       = 3
     max_size       = 4
     desired_size   = 3
