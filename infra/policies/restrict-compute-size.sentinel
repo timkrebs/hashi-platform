@@ -74,7 +74,13 @@ instance_types_of = func(rc) {
 			return null
 		}
 		instance_type = after[attr] else null
-		if instance_type is not null {
+
+		# An empty instance type means the attribute is simply not set. EKS
+		# managed node groups are the common case: their launch template leaves
+		# it out and the type comes from the node group's `instance_types`,
+		# which this policy checks on the `aws_eks_node_group` resource. The
+		# provider plans that absence as "", not null, so both are skipped.
+		if instance_type is not null and instance_type is not "" {
 			append(result, instance_type)
 		}
 	}

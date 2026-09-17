@@ -147,7 +147,9 @@ resource_changes = {
 		"change": {
 			"actions": ["create"],
 			"after": {
-				"instance_type": null,
+				# The module leaves instance_type out of the launch template, and
+				# the provider plans that absence as "" rather than null.
+				"instance_type": "",
 				"tags": {
 					"Environment": "Dev",
 					"ManagedBy":   "Terraform",
