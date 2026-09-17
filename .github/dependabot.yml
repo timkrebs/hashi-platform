@@ -13,6 +13,23 @@ updates:
     schedule:
       interval: weekly
     groups:
+      # The AWS provider and the upstream AWS modules have to move together.
+      # terraform-aws-modules declare an open lower bound on the provider
+      # (eks 20.8.5 says ">= 5.40"), so Terraform will happily install a
+      # provider major the module predates -- and then fail on schema that the
+      # major removed. eks 20.8.5 with provider 6.x is exactly that: it still
+      # uses the elastic_gpu_specifications and elastic_inference_accelerator
+      # launch template blocks, which 6.0 dropped. Conversely eks 21.x requires
+      # aws >= 6.59, so the module bump cannot land without the provider bump.
+      # One group means one coordinated pull request instead of several that
+      # each fail on their own.
+      aws-stack:
+        patterns:
+          - "hashicorp/aws"
+          - "terraform-aws-modules/*"
+
       terraform-providers:
         patterns:
           - "hashicorp/*"
+        exclude-patterns:
+          - "hashicorp/aws"

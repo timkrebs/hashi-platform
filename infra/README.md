@@ -345,11 +345,21 @@ tflint --recursive --config "$PWD/.tflint.hcl"
 | terraform-aws-modules/iam/aws (assumable-role-oidc, irsa-eks)     | 5.39.0  |
 | Helm chart eks/aws-load-balancer-controller                       | 3.5.0   |
 | Helm chart jetstack/cert-manager                                  | 1.21.1  |
-| Checkmk Raw Edition (.deb, Ubuntu 24.04 noble)                    | 2.4.0p36 |
+| Checkmk Raw Edition (.deb, Ubuntu 24.04 noble)                    | 2.4.0p36|
 | Hardened base image (ami-prod `888995627335`)                     | latest  |
 
 These are pinned inside the modules. Bump them there and run the unit tests
-plus a plan in dev before rolling forward. Dependabot tracks neither Helm charts
+plus a plan in dev before rolling forward.
+
+**The AWS provider and the terraform-aws-modules move together.** Those modules
+declare an open lower bound on the provider (`eks` 20.8.5 says `aws >= 5.40`),
+so Terraform will install a provider major the module predates and then fail on
+schema the major removed — provider 6.x against `eks` 20.8.5 fails on the
+`elastic_gpu_specifications` and `elastic_inference_accelerator` launch template
+blocks that 6.0 dropped. In the other direction `eks` 21.x requires
+`aws >= 6.59`. Neither bump works alone, so Dependabot groups them as
+`aws-stack` and proposes one coordinated pull request; a provider major means
+reviewing the upstream modules' own major upgrade guides at the same time. Dependabot tracks neither Helm charts
 nor the Checkmk package; bump them by hand. Checkmk additionally pins the
 package checksum, which has to be refreshed from the `.hash` sidecar in the same
 change — see the

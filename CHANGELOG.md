@@ -72,7 +72,6 @@ for the modules once they are tagged.
   where the hardened EKS node image is published. EKS upgrades one minor version
   per apply, and no hardened image exists for 1.34, so the nodes stay on AL2023
   until the cluster reaches 1.35.
-
 - Replaced the copied EKS tutorial configuration (embedded provider, fixed
   CIDRs and node groups) with the two modules above.
 - Node groups default to Amazon Linux 2023 images; Amazon Linux 2 images are
@@ -86,6 +85,10 @@ for the modules once they are tagged.
   down platform before cluster and stops on failure.
 - The cluster workspace auto-destroys after 2 days, the platform workspace
   after 1, so the platform layer is always torn down first.
+- Dependabot groups the AWS provider with the `terraform-aws-modules` registry
+  modules as `aws-stack`, because neither can be bumped across a major on its
+  own: the modules declare an open lower bound on the provider, so a provider
+  major installs against a module that predates it and fails on removed schema.
 
 ### Removed
 
@@ -107,4 +110,4 @@ for the modules once they are tagged.
   operated outside this configuration.
 - Unused `random_string` resource and the `random` provider requirement.
 
-[Unreleased]: https://github.com/timkrebs/hashi-platform/commits/dev
+[Unreleased]: https://github.com/timkrebs/hashi-platform/commits/main
