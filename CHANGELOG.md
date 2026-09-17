@@ -52,6 +52,10 @@ for the modules once they are tagged.
   `aws-eks-cluster` gains `use_hardened_node_ami`, `node_ami_owner` and
   `node_ami_architecture` to run managed node groups on
   `hc-base-ubuntu-2404-eks-<version>-amd64-*`.
+- Hardened nodes pass `--resolv-conf=/run/systemd/resolve/resolv.conf` to
+  kubelet (`node_bootstrap_extra_args`). Ubuntu's systemd-resolved stub would
+  otherwise reach every pod as `127.0.0.53`, making CoreDNS forward to itself
+  and abort with "loop detected", which takes cluster DNS down entirely.
 - The EKS node image is selected by `cluster_version`, so it cannot drift ahead
   of the control plane; a version with no published image fails the plan rather
   than creating nodes that never join. Custom images also need
@@ -108,16 +112,13 @@ for the modules once they are tagged.
 - The branch-per-environment model. `main` is the only long-lived branch; the
   workflows trigger on it and target `dev` directly, and the promotion-driven
   destroy trigger is gone (the destroy workflow is manual dispatch only).
-- Argo CD from the platform layer: the `argocd` and `argocd-root-app` modules,
-  their module blocks, outputs and the in-cluster secret bridge
-  (`hashi-platform.io/*` annotations) in all three environments. Nothing in
-  this repository deploys workloads into the cluster any more.
-- Self-managed Vault: the `vault-aws-prerequisites` module (KMS unseal key,
-  unseal and init IRSA roles, Secrets Manager init secret) and the
-  `vault_allowed_cidrs`, `vault_kms_key_deletion_window_in_days` and
-  `vault_init_secret_recovery_window_in_days` variables from all three
-  platform layers. Secrets are served by HCP Vault Dedicated, which is
-  operated outside this configuration.
+- The `argocd-root-app` module. The root Application now lives in
+  `gitops/bootstrap/` and is applied once by hand, so Terraform does not
+  duplicate it.
+- The in-cluster secret bridge (`hashi-platform.io/*` annotations on the Argo CD
+  cluster secret). Account-specific values reach Vault through the service
+  account annotation Terraform sets instead, and the unseal key is referenced by
+  its deterministic KMS alias.
 - Unused `random_string` resource and the `random` provider requirement.
 
 [Unreleased]: https://github.com/timkrebs/hashi-platform/commits/main

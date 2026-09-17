@@ -73,6 +73,11 @@ Both EC2 estates run on the company's hardened images from the ami-prod account
 `hc-base-ubuntu-2404-amd64-*`, and the EKS node groups on
 `hc-base-ubuntu-2404-eks-<version>-amd64-*`.
 
+Because those nodes are Ubuntu, kubelet is pointed away from the
+systemd-resolved stub resolver; without that CoreDNS forwards to itself and
+cluster DNS collapses. See the
+[module README](modules/aws-eks-cluster/README.md#hardened-node-images).
+
 The EKS image family is published per Kubernetes version, and the module derives
 the name from `cluster_version`, so the node image can never drift ahead of the
 control plane. Today only **1.35** has an image; there is none for 1.33 or 1.34.

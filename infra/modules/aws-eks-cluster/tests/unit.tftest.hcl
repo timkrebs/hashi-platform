@@ -350,3 +350,29 @@ run "rejects_a_malformed_node_ami_owner" {
 
   expect_failures = [var.node_ami_owner]
 }
+
+# Ubuntu nodes ship systemd-resolved, whose stub resolver (127.0.0.53) makes
+# CoreDNS forward to itself and abort with "loop detected". kubelet has to be
+# pointed at the real resolver, or DNS is broken cluster-wide.
+run "hardened_nodes_avoid_the_systemd_resolved_dns_loop" {
+  command = plan
+
+  variables {
+    use_hardened_node_ami = true
+    cluster_version       = "1.35"
+  }
+
+  assert {
+    condition     = strcontains(local.node_group_ami_defaults.bootstrap_extra_args, "--resolv-conf=/run/systemd/resolve/resolv.conf")
+    error_message = "Hardened Ubuntu nodes must point kubelet away from the systemd-resolved stub."
+  }
+}
+
+run "aws_optimised_nodes_get_no_bootstrap_overrides" {
+  command = plan
+
+  assert {
+    condition     = local.node_group_ami_defaults.bootstrap_extra_args == ""
+    error_message = "Amazon Linux does not use systemd-resolved, so it needs no resolv.conf override."
+  }
+}

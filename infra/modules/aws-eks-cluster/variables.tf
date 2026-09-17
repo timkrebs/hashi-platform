@@ -88,6 +88,12 @@ variable "node_ami_owner" {
   }
 }
 
+variable "node_bootstrap_extra_args" {
+  description = "Extra arguments for /etc/eks/bootstrap.sh on the hardened nodes. The default points kubelet at the real resolver instead of Ubuntu's systemd-resolved stub: the stub puts 127.0.0.53 in /etc/resolv.conf, kubelet hands that to every pod, and CoreDNS then forwards to itself and dies with \"loop detected\". Only applied when use_hardened_node_ami is true, because the AWS-optimised Amazon Linux images do not use systemd-resolved."
+  type        = string
+  default     = "--kubelet-extra-args '--resolv-conf=/run/systemd/resolve/resolv.conf'"
+}
+
 variable "node_ami_architecture" {
   description = "Architecture of the hardened EKS image. It must match the instance types in node_groups."
   type        = string

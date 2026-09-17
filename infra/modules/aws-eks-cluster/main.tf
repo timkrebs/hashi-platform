@@ -41,6 +41,7 @@ locals {
     ami_id                     = var.use_hardened_node_ami ? local.hardened_node_ami_id : ""
     enable_bootstrap_user_data = var.use_hardened_node_ami
     platform                   = "linux"
+    bootstrap_extra_args       = var.use_hardened_node_ami ? var.node_bootstrap_extra_args : ""
   }
 
   node_groups = {

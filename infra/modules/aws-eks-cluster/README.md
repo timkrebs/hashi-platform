@@ -167,6 +167,17 @@ boot and never register. Upstream sets the node group's `ami_type` to null once
 a custom `ami_id` is present and lets the EKS API infer `CUSTOM`, so `ami_type`
 is ignored in that case.
 
+The hardened image is Ubuntu, which changes one thing that is easy to miss.
+Ubuntu runs systemd-resolved, whose stub resolver writes `nameserver
+127.0.0.53` into `/etc/resolv.conf`. kubelet hands that file to every pod, so
+CoreDNS forwards queries to itself and aborts with
+`[FATAL] plugin/loop: Loop detected`. Cluster DNS is then dead, and it surfaces
+as unrelated-looking failures — Argo CD's repo-server failing its liveness
+probe, Applications stuck in `Unknown`. The module therefore passes
+`--kubelet-extra-args '--resolv-conf=/run/systemd/resolve/resolv.conf'` to the
+bootstrap on hardened nodes (`node_bootstrap_extra_args`). Amazon Linux does
+not use systemd-resolved and gets no override.
+
 Check which versions have an image before turning this on:
 
 ```sh
