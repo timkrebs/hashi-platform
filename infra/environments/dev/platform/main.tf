@@ -48,6 +48,9 @@ module "argocd" {
   cluster_secret_labels = {
     "hashi-platform.io/environment" = local.environment
   }
+
+  service_type                = var.argocd_service_type
+  load_balancer_source_ranges = var.argocd_allowed_cidr_blocks
 }
 
 module "vault_prerequisites" {

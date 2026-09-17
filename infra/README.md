@@ -155,6 +155,29 @@ marks it default (`create_default_storage_class`). Without it every claim stays
 After the first start the cluster still has to be initialised and unsealed
 once, and an audit device enabled — `auditStorage` only provisions the volume.
 
+### Reaching the UIs
+
+Both control-plane UIs are published through internet-facing network load
+balancers. The NLB passes TCP straight through, so Argo CD and Vault keep
+terminating TLS themselves — no ACM certificate and therefore no domain is
+needed. The trade-off is that both certificates are self-signed, so browsers
+warn on the first visit.
+
+```sh
+kubectl get svc argocd-server -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+kubectl get svc vault-ui      -n vault  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+```
+
+Argo CD listens on 443, Vault's UI on 8200 (`https://<hostname>:8200`). The
+initial Argo CD password comes from
+`terraform output -raw argocd_initial_admin_password`.
+
+Both are open to `0.0.0.0/0` by default, which is a deliberate choice and not a
+safe one: Argo CD can deploy anything into the cluster, and Vault is the secret
+store. Narrow `argocd_allowed_cidr_blocks` in `dev.tfvars` and
+`ui.loadBalancerSourceRanges` in `gitops/values/vault/values.yaml` as soon as
+this is more than a sandbox. Each load balancer also costs roughly $16 a month.
+
 ### Monitoring
 
 The platform layer also runs a Checkmk Raw server on a single EC2 instance in a

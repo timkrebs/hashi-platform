@@ -75,3 +75,49 @@ run "rejects_unpinned_chart_version" {
 
   expect_failures = [var.chart_version]
 }
+
+run "ui_stays_internal_by_default" {
+  command = plan
+
+  assert {
+    condition     = yamldecode(helm_release.this.values[0]).server.service.type == "ClusterIP"
+    error_message = "The UI should not be exposed unless asked for."
+  }
+
+  assert {
+    condition     = length(yamldecode(helm_release.this.values[0]).server.service.annotations) == 0
+    error_message = "Load balancer annotations belong only on a LoadBalancer service."
+  }
+}
+
+run "load_balancer_is_internet_facing_and_range_restricted" {
+  command = plan
+
+  variables {
+    service_type                = "LoadBalancer"
+    load_balancer_source_ranges = ["203.0.113.0/24"]
+  }
+
+  assert {
+    condition     = yamldecode(helm_release.this.values[0]).server.service.annotations["service.beta.kubernetes.io/aws-load-balancer-scheme"] == "internet-facing"
+    error_message = "A LoadBalancer service should be reachable from the internet."
+  }
+
+  # The list must survive as a list: a whole-object conditional would collapse
+  # it into a string and the restriction would silently not apply.
+  assert {
+    condition     = join(",", yamldecode(helm_release.this.values[0]).server.service.loadBalancerSourceRanges) == "203.0.113.0/24"
+    error_message = "Source ranges must reach the chart as a list."
+  }
+}
+
+run "rejects_an_invalid_source_range" {
+  command = plan
+
+  variables {
+    service_type                = "LoadBalancer"
+    load_balancer_source_ranges = ["203.0.113.0"]
+  }
+
+  expect_failures = [var.load_balancer_source_ranges]
+}

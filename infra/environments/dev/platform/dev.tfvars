@@ -20,3 +20,8 @@ enable_vault_prerequisites = true
 # so a rebuilt environment can reuse the name.
 vault_kms_key_deletion_window_in_days     = 7
 vault_init_secret_recovery_window_in_days = 0
+
+# Argo CD UI oeffentlich erreichbar. Auf Office-/VPN-Bereiche einschraenken,
+# sobald das mehr als eine Sandbox ist.
+argocd_service_type        = "LoadBalancer"
+argocd_allowed_cidr_blocks = ["0.0.0.0/0"]

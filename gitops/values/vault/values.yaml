@@ -11,6 +11,30 @@ global:
 injector:
   enabled: true
 
+# Oeffentlich erreichbare UI/API ueber einen internet-facing NLB.
+#
+# Der NLB reicht TCP durch, Vault terminiert TLS selbst mit dem cert-manager-
+# Zertifikat. Damit bleibt die Verbindung Ende-zu-Ende verschluesselt und es
+# wird kein ACM-Zertifikat (und damit keine Domain) gebraucht -- der Browser
+# warnt allerdings, weil die CA selbstsigniert ist.
+#
+# WARNUNG: loadBalancerSourceRanges auf 0.0.0.0/0 stellt die Vault-API der
+# gesamten Welt zur Verfuegung. Das Login-Formular und jeder Auth-Endpoint sind
+# damit offen fuer Credential Stuffing. Schraenke das auf Office- oder
+# VPN-Bereiche ein, sobald das mehr als eine Sandbox ist.
+ui:
+  enabled: true
+  serviceType: LoadBalancer
+  externalPort: 8200
+  targetPort: 8200
+  publishNotReadyAddresses: true
+  loadBalancerSourceRanges:
+    - 0.0.0.0/0
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: external
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+
 server:
   image:
     # Enterprise-Image, sonst laedt keine Lizenz. Tag-Schema ist "<version>-ent".

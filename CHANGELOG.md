@@ -72,6 +72,11 @@ for the modules once they are tagged.
   (`create_default_storage_class`). The `gp2` class EKS ships uses the in-tree
   provisioner Kubernetes removed in 1.31, and the EBS CSI addon ships no class
   of its own, so every PersistentVolumeClaim stayed `Pending`.
+- The Argo CD and Vault UIs are published through internet-facing network load
+  balancers (`argocd_service_type`, `argocd_allowed_cidr_blocks`, and `ui.*` in
+  the Vault values). The NLBs pass TCP through so both keep terminating TLS
+  themselves, which avoids needing a domain and an ACM certificate at the cost
+  of a self-signed certificate warning. Both default to `0.0.0.0/0`.
 - Vault TLS is issued by cert-manager from `gitops/manifests/vault-pki`. The
   certificate covers `*.vault-internal` so Raft peers can verify each other.
 - Composite action `hcp-workspace-state` and a shared plan-report script for

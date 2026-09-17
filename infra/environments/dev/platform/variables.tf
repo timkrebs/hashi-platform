@@ -85,3 +85,15 @@ variable "create_default_storage_class" {
   type        = bool
   default     = true
 }
+
+variable "argocd_service_type" {
+  description = "Service type for the Argo CD UI. LoadBalancer puts an internet-facing NLB in front of it; ClusterIP keeps it behind port-forward."
+  type        = string
+  default     = "LoadBalancer"
+}
+
+variable "argocd_allowed_cidr_blocks" {
+  description = "CIDR blocks allowed to reach the Argo CD UI. Defaults to the whole internet, which is worth narrowing: Argo CD can deploy anything into the cluster."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
