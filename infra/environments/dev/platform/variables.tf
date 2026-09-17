@@ -27,3 +27,55 @@ variable "checkmk_allowed_cidr_blocks" {
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
+
+variable "enable_argocd" {
+  description = "Install Argo CD. Its Applications are not managed here: apply gitops/bootstrap/root-app.yaml once, then everything under gitops/apps is reconciled from Git."
+  type        = bool
+  default     = true
+}
+
+variable "enable_vault_prerequisites" {
+  description = "Create the AWS resources Vault needs before it can start: the KMS auto-unseal key, the IRSA roles, the Secrets Manager secret for the init output, and the namespace and service accounts carrying the role annotations."
+  type        = bool
+  default     = true
+}
+
+variable "vault_namespace" {
+  description = "Namespace Vault runs in. Must match the destination namespace of the Vault Application in gitops/apps."
+  type        = string
+  default     = "vault"
+}
+
+variable "vault_service_account" {
+  description = "Service account the Vault server runs as. Must match server.serviceAccount.name in the Helm values."
+  type        = string
+  default     = "vault"
+}
+
+variable "vault_init_service_account" {
+  description = "Service account the one-off init job runs as. It may write the init output to Secrets Manager; the server may not."
+  type        = string
+  default     = "vault-init"
+}
+
+variable "vault_kms_key_deletion_window_in_days" {
+  description = "Days KMS waits before deleting Vault's unseal key after a destroy."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.vault_kms_key_deletion_window_in_days >= 7 && var.vault_kms_key_deletion_window_in_days <= 30
+    error_message = "vault_kms_key_deletion_window_in_days must be between 7 and 30; AWS rejects anything outside that range."
+  }
+}
+
+variable "vault_init_secret_recovery_window_in_days" {
+  description = "Days Secrets Manager keeps the Vault init secret recoverable after a destroy. 0 deletes it immediately, so a rebuilt environment can reuse the name."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.vault_init_secret_recovery_window_in_days == 0 || (var.vault_init_secret_recovery_window_in_days >= 7 && var.vault_init_secret_recovery_window_in_days <= 30)
+    error_message = "vault_init_secret_recovery_window_in_days must be 0 or between 7 and 30."
+  }
+}

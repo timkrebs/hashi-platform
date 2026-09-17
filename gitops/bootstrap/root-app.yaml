@@ -1,0 +1,21 @@
+# Einmalig von Hand anwenden, nachdem Terraform Argo CD installiert hat:
+#
+#   kubectl apply -f gitops/bootstrap/root-app.yaml
+#
+# Ab da synchronisiert Argo CD alles unter gitops/apps/ selbst.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/timkrebs/hashi-platform.git
+    targetRevision: main
+    path: gitops/apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }

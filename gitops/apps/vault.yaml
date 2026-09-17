@@ -1,0 +1,41 @@
+# gitops/apps/vault.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vault
+  namespace: argocd
+  annotations:
+    # cert-manager kommt aus dem Terraform platform layer, die Vault-PKI aus
+    # vault-pki.yaml (Wave 5). Vault selbst zuletzt, damit das TLS-Secret steht.
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  project: default
+  sources:
+    - repoURL: https://helm.releases.hashicorp.com
+      chart: vault
+      targetRevision: 0.34.1
+      helm:
+        releaseName: vault
+        valueFiles:
+          - $values/gitops/values/vault/values.yaml
+    - repoURL: https://github.com/timkrebs/hashi-platform.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vault
+  syncPolicy:
+    automated:
+      prune: false        # bei Tier-0 lieber nichts automatisch löschen
+      selfHeal: true
+    syncOptions:
+      # Namespace und ServiceAccount legt Terraform an (IRSA-Annotation braucht
+      # die Account-ID, die nicht in dieses öffentliche Repo gehört).
+      # CreateNamespace bleibt als Fallback drin und ist dann ein No-op.
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+      jqPathExpressions:
+        - .webhooks[]?.clientConfig.caBundle

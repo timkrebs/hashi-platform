@@ -1,0 +1,26 @@
+# gitops/apps/vault-pki.yaml
+#
+# Ausstellerkette und Server-Zertifikat fuer Vault. Muss vor Vault selbst
+# synchronisiert werden, weil der StatefulSet-Pod das Secret mountet.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vault-pki
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/timkrebs/hashi-platform.git
+    targetRevision: main
+    path: gitops/manifests/vault-pki
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vault
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

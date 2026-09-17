@@ -1,0 +1,37 @@
+# Selbstsignierte CA fuer die interne Vault-Kommunikation. Fuer einen oeffentlich
+# erreichbaren Endpoint stattdessen einen ACME-Issuer verwenden, dann entfaellt
+# das Verteilen der CA an die Clients.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: vault-selfsign
+  namespace: vault
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: vault-ca
+  namespace: vault
+spec:
+  isCA: true
+  commonName: vault-ca
+  secretName: vault-ca
+  duration: 87600h    # 10 Jahre
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: vault-selfsign
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: vault-ca-issuer
+  namespace: vault
+spec:
+  ca:
+    secretName: vault-ca

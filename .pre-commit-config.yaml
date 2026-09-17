@@ -11,6 +11,8 @@ repos:
       - id: mixed-line-ending
         args: [--fix=lf]
       - id: check-yaml
+        # Kubernetes-Manifeste buendeln mehrere Objekte per --- in eine Datei.
+        args: [--allow-multiple-documents]
       - id: check-json
       - id: check-merge-conflict
       - id: check-added-large-files

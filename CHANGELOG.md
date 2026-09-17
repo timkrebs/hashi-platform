@@ -56,6 +56,16 @@ for the modules once they are tagged.
   of the control plane; a version with no published image fails the plan rather
   than creating nodes that never join. Custom images also need
   `enable_bootstrap_user_data`, because EKS injects no bootstrap for them.
+- Argo CD is installed by the platform layer again, and the `gitops/` tree it
+  reconciles: a root Application applied once by hand, the Vault PKI, and Vault
+  itself from the upstream Helm chart through a multi-source Application.
+- `vault-aws-prerequisites` is restored for the in-cluster Vault: KMS
+  auto-unseal key, IRSA roles and the Secrets Manager secret for the init
+  output. The platform layer also creates the Vault namespace and its service
+  accounts, because the IRSA annotation carries the AWS account ID and this
+  repository is public.
+- Vault TLS is issued by cert-manager from `gitops/manifests/vault-pki`. The
+  certificate covers `*.vault-internal` so Raft peers can verify each other.
 - Composite action `hcp-workspace-state` and a shared plan-report script for
   the workflows.
 - `.terraform-version` pinning Terraform to 1.15.9, so tenv and friends select

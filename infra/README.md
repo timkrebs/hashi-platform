@@ -93,6 +93,56 @@ producing nodes that never join the cluster.
 Kubernetes 1.33 is on extended support, which bills the control plane at roughly
 six times the standard rate, so this sequence also takes the cluster off that.
 
+### GitOps and Vault
+
+Argo CD is installed by the platform layer, but nothing it runs is defined in
+Terraform. The chain is handed over once, by hand:
+
+```sh
+terraform output -raw argocd_bootstrap_command   # kubectl apply -f gitops/bootstrap/root-app.yaml
+```
+
+From there the root Application reconciles everything under `gitops/apps/`,
+which currently means the Vault PKI (sync wave 5) and Vault itself (wave 10).
+Vault is deployed from the upstream Helm chart with values held in this
+repository, through an Argo CD multi-source Application.
+
+Terraform provides only what Vault cannot create for itself, in
+`vault-aws-prerequisites`: the KMS auto-unseal key, the two IRSA roles, and the
+Secrets Manager secret that receives the init output. The namespace and service
+accounts are created by Terraform too, because the IRSA annotation contains the
+AWS account ID and this repository is public. The Helm values therefore set
+`server.serviceAccount.create = false`.
+
+The unseal configuration references the KMS **alias**
+(`alias/hashi-platform-dev-vault-unseal`), not the key ID. The alias is
+deterministic and survives a rebuild of the environment, so no account-specific
+identifier has to travel into `gitops/`.
+
+**TLS** is issued by cert-manager, which the platform layer already installs.
+`gitops/manifests/vault-pki` creates a self-signed CA, a CA issuer, and the
+server certificate. The certificate covers `*.vault-internal` because the Raft
+peers reach each other through the headless service as
+`vault-0.vault-internal`; without those names `retry_join` with
+`auto_join_scheme = "https"` fails certificate verification. For a
+publicly reachable endpoint, swap the self-signed issuer for an ACME one and
+the CA distribution problem disappears.
+
+**The Enterprise license** is a Kubernetes secret created out of band. It must
+never be committed:
+
+```sh
+terraform output -raw vault_license_secret_command
+```
+
+The chart mounts it and sets `VAULT_LICENSE_PATH` itself, so the Vault
+configuration needs no entry for it. The license only loads on the Enterprise
+image, which is why the values pin `hashicorp/vault-enterprise:<version>-ent`
+rather than `hashicorp/vault`.
+
+After the first start the cluster still has to be initialised and unsealed
+once, and an audit device enabled — `auditStorage` only provisions the volume.
+
 ### Monitoring
 
 The platform layer also runs a Checkmk Raw server on a single EC2 instance in a
