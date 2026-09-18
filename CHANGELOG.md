@@ -86,6 +86,10 @@ for the modules once they are tagged.
   the Vault values). The NLBs pass TCP through so both keep terminating TLS
   themselves, which avoids needing a domain and an ACM certificate at the cost
   of a self-signed certificate warning. Both default to `0.0.0.0/0`.
+- Vault's `retry_join` sets `leader_ca_cert_file`. Without it a joining node
+  verifies the leader against the system CAs, fails with `certificate signed by
+  unknown authority`, and the cluster stays at one peer while the other pods sit
+  at `0/1` with no outward sign of the cause.
 - Vault TLS is issued by cert-manager from `gitops/manifests/vault-pki`. The
   certificate covers `*.vault-internal` so Raft peers can verify each other.
 - Composite action `hcp-workspace-state` and a shared plan-report script for

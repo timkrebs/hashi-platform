@@ -42,4 +42,4 @@ Thumbs.db
 !.vscode/extensions.json
 
 # Miscellaneous
-apps/vault/*
+apps/*

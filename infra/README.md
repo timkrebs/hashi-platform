@@ -133,6 +133,15 @@ peers reach each other through the headless service as
 publicly reachable endpoint, swap the self-signed issuer for an ACME one and
 the CA distribution problem disappears.
 
+The `retry_join` block needs **both** `leader_ca_cert_file` and
+`leader_tls_servername`. The joining node verifies the leader's certificate
+against the system CAs, which do not contain the cert-manager CA, and
+`auto_join` discovers peers by pod IP while the certificate only carries DNS
+names. Miss either and the cluster silently stays at a single peer: the leader
+comes up fine, the other pods sit at `0/1` forever, and the only hint is
+`x509: certificate signed by unknown authority` in their logs. `VAULT_CACERT`
+does not help here — it applies to the CLI, not to the server's join client.
+
 **The Enterprise license** is a Kubernetes secret created out of band. It must
 never be committed:
 

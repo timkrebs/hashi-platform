@@ -100,8 +100,21 @@ server:
           path = "/vault/data"
 
           retry_join {
-            auto_join             = "provider=k8s namespace=vault label_selector=\"app.kubernetes.io/name=vault,component=server\""
-            auto_join_scheme      = "https"
+            auto_join        = "provider=k8s namespace=vault label_selector=\"app.kubernetes.io/name=vault,component=server\""
+            auto_join_scheme = "https"
+
+            # Ohne diese beiden scheitert der Join an TLS, und der Cluster
+            # bleibt bei einem einzigen Peer stehen:
+            #
+            # leader_ca_cert_file  - der beitretende Knoten prueft das
+            #   Zertifikat des Leaders gegen die System-CAs, in denen unsere
+            #   cert-manager-CA nicht steht ("certificate signed by unknown
+            #   authority"). VAULT_CACERT hilft hier nicht, das gilt nur fuer
+            #   die CLI.
+            # leader_tls_servername - auto_join findet Peers ueber ihre Pod-IP;
+            #   das Zertifikat hat aber nur DNS-SANs, also muss der Name fuer
+            #   die Pruefung explizit gesetzt werden.
+            leader_ca_cert_file   = "/vault/tls/ca.crt"
             leader_tls_servername = "vault.vault.svc.cluster.local"
           }
         }
