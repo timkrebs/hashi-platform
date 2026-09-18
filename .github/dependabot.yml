@@ -5,13 +5,32 @@ updates:
     schedule:
       interval: daily
 
-  # Providers and registry modules pinned in the modules and environment roots.
+  # Providers and registry modules pinned in the modules, the environment roots
+  # and config/.
   - package-ecosystem: terraform
     directories:
       - "/infra/modules/*"
       - "/infra/environments/*/*"
+      - "/config/*"
     schedule:
       interval: weekly
+    # A major of the AWS stack is not a version bump, it is a migration, and a
+    # bot cannot do it: eks 21.x renames every argument this repository passes
+    # (cluster_name, cluster_version, cluster_endpoint_public_access,
+    # cluster_addons) and drops eks_managed_node_group_defaults outright, while
+    # iam 6.x deletes the iam-assumable-role-with-oidc submodule and renames
+    # iam-role-for-service-accounts-eks. Four modules have to be rewritten in one
+    # change, and the plan has to be read for a forced replacement of the cluster
+    # or its node groups -- which would take Vault, Argo CD and the observability
+    # stack with it. Unignored, Dependabot reopens the same red pull request
+    # every week and the noise trains everyone to ignore it. Minors and patches
+    # still flow through the group below. Lift this deliberately, following the
+    # checklist under "Upstream module versions" in infra/README.md.
+    ignore:
+      - dependency-name: "hashicorp/aws"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "terraform-aws-modules/*"
+        update-types: ["version-update:semver-major"]
     groups:
       # The AWS provider and the upstream AWS modules have to move together.
       # terraform-aws-modules declare an open lower bound on the provider

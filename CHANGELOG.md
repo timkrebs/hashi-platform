@@ -167,6 +167,14 @@ for the modules once they are tagged.
   modules as `aws-stack`, because neither can be bumped across a major on its
   own: the modules declare an open lower bound on the provider, so a provider
   major installs against a module that predates it and fails on removed schema.
+- Dependabot no longer proposes majors of the AWS provider or the
+  `terraform-aws-modules`, and now also watches `config/`. The grouped bump to
+  provider 6.x, `eks` 21.x, `iam` 6.x and `vpc` 6.x cannot merge: `eks` 21.x
+  renames every argument the cluster module passes and drops
+  `eks_managed_node_group_defaults`, and `iam` 6.x deletes
+  `iam-assumable-role-with-oidc` and renames `iam-role-for-service-accounts-eks`,
+  which four modules use. It is a migration, so it is written down as one in
+  `infra/README.md` instead of reappearing as a red pull request every week.
 
 ### Removed
 

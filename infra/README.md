@@ -508,3 +508,36 @@ blocks that 6.0 dropped. In the other direction `eks` 21.x requires
 `aws-stack` and proposes one coordinated pull request; a provider major means
 reviewing the upstream modules' own major upgrade guides at the same time. Dependabot tracks neither Helm charts
 nor the observability charts; bump those by hand.
+
+### Taking the `aws-stack` major
+
+Dependabot ignores majors of `hashicorp/aws` and `terraform-aws-modules/*`
+(`.github/dependabot.yml`). The bump it proposed — provider 6.x, `eks` 21.x,
+`iam` 6.x, `vpc` 6.x — rewrites four modules rather than moving a version
+string, so it belongs in its own change and not in a merged bot pull request:
+
+1. Finish the Kubernetes version sequence first. The cluster is part-way to
+   1.35, and a control plane upgrade plus a module major in one apply leaves a
+   failure impossible to attribute.
+2. `aws-eks-cluster`: `cluster_name` → `name`, `cluster_version` →
+   `kubernetes_version`, `cluster_endpoint_public_access` →
+   `endpoint_public_access`, `cluster_addons` → `addons`.
+   `eks_managed_node_group_defaults` is gone outright; what it holds has to move
+   into each entry of `eks_managed_node_groups`, which is where
+   `node_group_ami_defaults` — the hardened AMI and its bootstrap arguments — is
+   merged in today.
+3. `iam` 6.x deleted `iam-assumable-role-with-oidc`, used by `aws-eks-cluster`
+   and twice by `vault-aws-prerequisites`, and renamed
+   `iam-role-for-service-accounts-eks` (`aws-load-balancer-controller`,
+   `aws-fluent-bit-cloudwatch`) to `iam-role-for-service-accounts`. IRSA trust
+   policies and the Vault service account annotation are tied to the role names,
+   so read the plan for renamed roles and not only for changed arguments.
+4. Widen `>= 5.47.0, < 6.0.0` in every module's `versions.tf` and regenerate
+   every `.terraform.lock.hcl`; HCP Terraform runs fail on a stale lock.
+5. Check the plan for `must be replaced` on `aws_eks_cluster` and on the node
+   groups. Replacing either destroys Vault's Raft storage along with it, so that
+   is a signal to stop and take a Vault snapshot, not to apply.
+
+Leave the `ignore` in place afterwards. The next major will be the same kind of
+work, and it should start from a decision to do it rather than from an open
+pull request.
