@@ -57,9 +57,20 @@ vault token revoke -self                    # with the root token still set
 Two separate things have to line up, and they fail with different errors.
 
 **The CA.** Vault's certificate comes from the in-cluster cert-manager CA, which
-no public trust store knows. Point `vault_ca_cert_file` at that CA or set
-`VAULT_CACERT` on the runner, otherwise the error is
+no public trust store knows, and an HCP Terraform runner has no other way to
+obtain it. A copy therefore lives next to this configuration as `vault-ca.pem`,
+and `vault_ca_cert_file` points at it by default. Without it the error is
 `x509: certificate signed by unknown authority`.
+
+The file holds a certificate and no private key, which is why it can sit in a
+public repository. **Rebuilding the environment regenerates the CA**, and the
+committed copy is then stale — cert-manager issues a new self-signed root every
+time the namespace is recreated. Refresh it with:
+
+```sh
+kubectl get secret vault-tls -n vault -o jsonpath='{.data.ca\.crt}' \
+  | base64 -d > config/vault/vault-ca.pem
+```
 
 **The name.** cert-manager issued the certificate for the in-cluster names, and
 `vault_address` points at the load balancer, whose AWS-generated hostname is not

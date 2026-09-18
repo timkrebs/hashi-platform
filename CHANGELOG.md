@@ -92,6 +92,11 @@ for the modules once they are tagged.
   at `0/1` with no outward sign of the cause.
 - Vault TLS is issued by cert-manager from `gitops/manifests/vault-pki`. The
   certificate covers `*.vault-internal` so Raft peers can verify each other.
+- `config/vault/` ships the Vault CA as `vault-ca.pem` and trusts it by
+  default. Reaching Vault needs both a trusted CA and a matching name, and the
+  two fail with different errors; neither can be solved from a runner that has
+  never seen the cluster. The file carries no private key. A rebuilt environment
+  regenerates the CA and the copy has to be refreshed.
 - `config/vault/` takes `vault_tls_server_name`, so the provider can verify
   Vault's certificate against an in-cluster name while connecting through the
   load balancer, whose generated hostname the certificate does not carry.
@@ -116,6 +121,12 @@ for the modules once they are tagged.
   AppRole whose policy covers `sys/metrics` and `sys/health` and nothing else,
   bound to the VPC CIDR. `unauthenticated_metrics_access` stays off, because the
   Vault listener is internet-facing.
+- An `import` block adopts the `logging` namespace Argo CD had already created.
+  `terraform import` is unavailable with remote execution, and an import block
+  whose target is already managed is a no-op, so it is safe to leave in place.
+- The Fluent Bit Application does not create its namespace: the platform layer
+  owns it, because the service account in it needs an IRSA annotation carrying
+  the AWS account ID. With both creating it, whichever ran second failed.
 - `aws-fluent-bit-cloudwatch` module and its Application: container logs go to
   CloudWatch, not to Checkmk, which alerts on log patterns but does not store or
   search them. The log group and its retention are Terraform's, and the IAM

@@ -15,9 +15,9 @@ variable "vault_token" {
 }
 
 variable "vault_ca_cert_file" {
-  description = "Path to the CA certificate that signed Vault's server certificate. Leave null and set VAULT_CACERT on the runner instead, or fall back to vault_skip_tls_verify."
+  description = "CA certificate that signed Vault's server certificate. Defaults to the copy committed next to this configuration: cert-manager's CA is private, so no public trust store knows it, and the runner has no other way to obtain it. The file holds a certificate and no key, which is why it can live in a public repository. Rebuilding the environment regenerates the CA — refresh the file then, see the README."
   type        = string
-  default     = null
+  default     = "vault-ca.pem"
 }
 
 variable "vault_tls_server_name" {

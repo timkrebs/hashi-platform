@@ -33,5 +33,9 @@ spec:
       prune: true
       selfHeal: true
     syncOptions:
-      - CreateNamespace=true
+      # Deliberately no CreateNamespace: the platform layer owns this namespace
+      # and the service account in it, because the IRSA annotation carries the
+      # AWS account ID. If Argo CD created it first, Terraform would fail with
+      # "namespaces logging already exists". Until the platform layer has run,
+      # this Application simply retries.
       - ServerSideApply=true

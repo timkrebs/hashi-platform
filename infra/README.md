@@ -192,6 +192,14 @@ store. Narrow `argocd_allowed_cidr_blocks` in `dev.tfvars` and
 `ui.loadBalancerSourceRanges` in `gitops/values/vault/values.yaml` as soon as
 this is more than a sandbox. Each load balancer also costs roughly $16 a month.
 
+### Adopting resources created elsewhere
+
+`terraform import` does not work with remote execution, so a resource that
+already exists is adopted with an `import` block in the configuration instead;
+the next apply through the pipeline picks it up. An import block whose target is
+already in state is a no-op, so it neither fails nor repeats and can be removed
+at leisure.
+
 ### Monitoring and logs
 
 Metrics and state go to Checkmk, logs go to CloudWatch. That split is not
