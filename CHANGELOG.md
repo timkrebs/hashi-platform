@@ -116,10 +116,32 @@ for the modules once they are tagged.
 - The pipeline plans and applies `config/vault` after the platform layer, and
   posts a speculative Vault plan on pull requests. The stage carries no
   `-var-file`, and is skipped until the `hashi-platform-vault` workspace exists.
+- `auth-service`: a reference microservice under `kubernetes/apps/`. It issues
+  short-lived RS256 JWTs, verifies credentials against Vault's userpass auth,
+  and signs with Vault's Transit engine, so the private key is generated inside
+  Vault and never leaves it — a compromised pod cannot mint tokens once its
+  Vault token is gone. Verification is decentralised through
+  `/.well-known/jwks.json`, so no other service calls this one on the request
+  path. Structured JSON logs, bounded-cardinality Prometheus metrics, split
+  public and admin listeners, PodDisruptionBudget, `restricted` Pod Security,
+  and unit tests covering the token contract.
+- `config/vault/kubernetes-auth.tf`: the `kubernetes` auth backend in the
+  `hp-dev-backend` namespace, a Transit mount with a non-exportable RSA key, a
+  policy and a role bound to one ServiceAccount in one Kubernetes namespace.
+  This is what the Vault Agent Injector needed to authenticate a pod — it was
+  running, but Vault had only `userpass`, so no workload could log in.
 - Observability in the cluster: `kube-prometheus-stack` (Prometheus,
   Alertmanager, node-exporter, kube-state-metrics and Grafana), `loki` as the
   log store and `alloy` as the collector, all reconciled by Argo CD. Grafana is
   published through its own load balancer.
+- Argo CD no longer rewrites the Grafana admin password. The chart regenerates
+  it with `randAlphaNum 40` on every render, so each sync wrote a fresh value
+  into the Secret while Grafana keeps the password it was given at first start
+  in `grafana.db` on its PVC. The login then failed with a password that had
+  been read correctly. The Secret's `admin-password` and `admin-user` are now
+  under `ignoreDifferences` with `RespectIgnoreDifferences=true`, which is
+  needed because `ignoreDifferences` alone only affects the diff and a sync
+  would still write the field.
 - Two Grafana dashboards, reconciled by Argo CD as ConfigMaps that the chart's
   dashboard sidecar picks up: `SRE Overview` (cluster, Vault, workloads,
   resources on one page) and `Vault Enterprise` (seal state, Raft, leases,
@@ -190,6 +212,12 @@ for the modules once they are tagged.
 
 ### Removed
 
+- The Checkmk agents left behind in the cluster. Removing an Argo CD
+  Application does not remove what it deployed unless the Application carries
+  `resources-finalizer.argocd.argoproj.io`, so `checkmk-monitoring` kept running
+  two DaemonSets, a collector and an internet-facing load balancer with nothing
+  managing them. They held seven pod slots — two on every node — which is what
+  kept the third Vault replica, Loki and an admission job unschedulable.
 - Checkmk in full: the `aws-checkmk-server` module, its wiring in the platform
   layer, the `checkmk-kube-agent` Application, the monitoring AppRole in
   `config/vault` and `config/checkmk/`. Its site configuration could not be
