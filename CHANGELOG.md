@@ -137,6 +137,13 @@ for the modules once they are tagged.
   failing every admission call on this cluster: `fail_open_count` showed 150 of
   150 calls failing, and `failurePolicy: Ignore` admitted every pod without a
   sidecar and without an event.
+- Dependabot watches `gomod` under `kubernetes/apps/*`, grouping the
+  `golang.org/x/*` modules. Without it the Go services got no dependency
+  updates at all — the existing entries covered only Actions and Terraform,
+  which is how `golang.org/x/crypto` sat a year behind until Trivy failed the
+  build on twelve HIGH findings in its `ssh` packages. `govulncheck` had stayed
+  silent, correctly: none of that code is reachable from these binaries. The
+  two scanners answer different questions and are both kept.
 - `services.yml`: the build pipeline for the Go services —
   discover, fmt, vet, test, build, container-test, scan, push, bump. Services
   are discovered rather than listed: any directory under `kubernetes/apps/`

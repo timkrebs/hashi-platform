@@ -52,3 +52,27 @@ updates:
           - "hashicorp/*"
         exclude-patterns:
           - "hashicorp/aws"
+
+  # Go-Abhaengigkeiten der Services unter kubernetes/apps/.
+  #
+  # Ohne diesen Eintrag bekamen sie ueberhaupt keine Updates: die beiden
+  # Eintraege oben decken nur Actions und Terraform ab. Aufgefallen ist das
+  # erst, als Trivy zwoelf HIGH-Befunde in einem golang.org/x/crypto meldete,
+  # das ein Jahr alt war -- obwohl govulncheck schwieg, weil der verwundbare
+  # Code (ssh) von diesen Binaries gar nicht erreicht wird.
+  #
+  # Die Lehre daraus steckt in der Konfiguration: eine eingebettete Modulversion
+  # ist unabhaengig davon angreifbar, ob euer Code sie erreicht, und ein
+  # Scanner, der das Binary betrachtet, wird sie melden.
+  - package-ecosystem: gomod
+    directories:
+      - "/kubernetes/apps/*"
+    schedule:
+      interval: weekly
+    groups:
+      # Die x/-Module von golang.org bewegen sich gemeinsam und haben
+      # untereinander enge Anforderungen; einzeln gebumpt erzeugen sie
+      # widerspruechliche Pull Requests.
+      golang-x:
+        patterns:
+          - "golang.org/x/*"

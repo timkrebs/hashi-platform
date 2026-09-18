@@ -184,9 +184,16 @@ jobs:
 
       - name: govulncheck
         run: |
-          # Known vulnerabilities in the dependency tree AND in the Go
-          # toolchain itself. Unlike a generic scanner it only reports issues
-          # on code paths this binary actually reaches.
+          # Known vulnerabilities in the dependency tree and in the Go toolchain
+          # itself, filtered by reachability: it only reports what this code can
+          # actually call.
+          #
+          # This is NOT a substitute for the Trivy stage, and the two disagreeing
+          # is normal rather than a bug. govulncheck answers "can an attacker
+          # reach it", Trivy answers "does the shipped binary embed a version
+          # with known CVEs". A vulnerable module that is linked but never called
+          # is silent here and loud there -- and Trivy is right to be loud,
+          # because the next commit may well call it.
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
 
@@ -316,6 +323,8 @@ jobs:
           sarif_file: trivy.sarif
           category: trivy-${{ matrix.service }}
 
+      # Reports on the versions embedded in the image, with no reachability
+      # analysis -- see the govulncheck step for why that difference matters.
       - name: Trivy — gate on HIGH and CRITICAL
         uses: aquasecurity/trivy-action@v0.36.0
         with:
