@@ -138,3 +138,49 @@ resource "kubernetes_storage_class_v1" "gp3" {
     encrypted = "true"
   }
 }
+
+# Container logs go to CloudWatch, not to Checkmk: Checkmk alerts on patterns in
+# a file, it does not store or search log history. Metrics and state live in
+# Checkmk, logs live where they can actually be searched.
+module "fluent_bit" {
+  count  = var.enable_log_shipping ? 1 : 0
+  source = "../../../modules/aws-fluent-bit-cloudwatch"
+
+  cluster_name      = local.cluster_name
+  oidc_provider_arn = local.cluster.oidc_provider_arn
+
+  namespace            = var.logging_namespace
+  service_account_name = var.logging_service_account
+  log_group_name       = "/aws/eks/${local.cluster_name}/containers"
+  retention_in_days    = var.log_retention_in_days
+
+  tags = local.common_tags
+}
+
+# Same reason as the Vault service account: the IRSA annotation carries the AWS
+# account ID, which must not land in this public repository, so the chart is
+# told to reuse what Terraform created.
+resource "kubernetes_namespace_v1" "logging" {
+  count = var.enable_log_shipping ? 1 : 0
+
+  metadata {
+    name = var.logging_namespace
+
+    labels = {
+      "app.kubernetes.io/managed-by" = "terraform"
+    }
+  }
+}
+
+resource "kubernetes_service_account_v1" "fluent_bit" {
+  count = var.enable_log_shipping ? 1 : 0
+
+  metadata {
+    name      = var.logging_service_account
+    namespace = one(kubernetes_namespace_v1.logging[*].metadata[0].name)
+
+    annotations = {
+      "eks.amazonaws.com/role-arn" = one(module.fluent_bit[*].iam_role_arn)
+    }
+  }
+}

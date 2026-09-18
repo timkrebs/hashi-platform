@@ -306,3 +306,53 @@ resource "vault_generic_endpoint" "dev2" {
     token_policies = [vault_policy.frontend_dev.name]
   })
 }
+
+# ---------------------------------------------------------------------------
+# Monitoring: read-only access for Checkmk
+# ---------------------------------------------------------------------------
+
+# Vault's Prometheus endpoint requires a token. It is deliberately left that
+# way: the listener is published through an internet-facing load balancer, and
+# unauthenticated_metrics_access would put seal state, token counts and request
+# rates on the open internet. Checkmk gets an AppRole with exactly one path
+# instead.
+resource "vault_policy" "metrics" {
+  name = "metrics"
+
+  policy = <<-EOT
+    # Prometheus-formatted telemetry, nothing else.
+    path "sys/metrics" {
+      capabilities = ["read"]
+    }
+
+    # Seal and replication state, so a scrape can tell "sealed" from "down".
+    path "sys/health" {
+      capabilities = ["read"]
+    }
+  EOT
+}
+
+resource "vault_auth_backend" "approle" {
+  type        = "approle"
+  path        = "approle"
+  description = "Machine logins. Currently only the monitoring role."
+}
+
+resource "vault_approle_auth_backend_role" "checkmk" {
+  backend        = vault_auth_backend.approle.path
+  role_name      = "checkmk"
+  token_policies = [vault_policy.metrics.name]
+
+  # Short-lived tokens that renew: a leaked scrape token expires on its own.
+  token_ttl     = 3600
+  token_max_ttl = 14400
+
+  # The scrape comes from the Checkmk host inside the VPC.
+  token_bound_cidrs     = var.monitoring_bound_cidrs
+  secret_id_bound_cidrs = var.monitoring_bound_cidrs
+}
+
+# The role id is not a secret; the secret id is, and is deliberately not created
+# here. Generating it in Terraform would put a long-lived credential into state.
+# Create it out of band:
+#   vault write -f auth/approle/role/checkmk/secret-id

@@ -97,3 +97,27 @@ variable "argocd_allowed_cidr_blocks" {
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
+
+variable "enable_log_shipping" {
+  description = "Ship container logs to CloudWatch Logs with Fluent Bit. Checkmk handles metrics and state; it is not a log store, so the logs go where they can be searched."
+  type        = bool
+  default     = true
+}
+
+variable "logging_namespace" {
+  description = "Namespace Fluent Bit runs in. Must match the destination namespace of its Application in gitops/apps."
+  type        = string
+  default     = "logging"
+}
+
+variable "logging_service_account" {
+  description = "Service account Fluent Bit runs as. Must match serviceAccount.name in the Helm values."
+  type        = string
+  default     = "aws-for-fluent-bit"
+}
+
+variable "log_retention_in_days" {
+  description = "How long CloudWatch keeps the container logs."
+  type        = number
+  default     = 14
+}

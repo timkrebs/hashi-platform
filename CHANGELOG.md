@@ -111,6 +111,17 @@ for the modules once they are tagged.
 - The pipeline plans and applies `config/vault` after the platform layer, and
   posts a speculative Vault plan on pull requests. The stage carries no
   `-var-file`, and is skipped until the `hashi-platform-vault` workspace exists.
+- Checkmk monitoring for the cluster and for Vault: the `checkmk-kube-agent`
+  collectors behind an internal load balancer restricted to the VPC, and a Vault
+  AppRole whose policy covers `sys/metrics` and `sys/health` and nothing else,
+  bound to the VPC CIDR. `unauthenticated_metrics_access` stays off, because the
+  Vault listener is internet-facing.
+- `aws-fluent-bit-cloudwatch` module and its Application: container logs go to
+  CloudWatch, not to Checkmk, which alerts on log patterns but does not store or
+  search them. The log group and its retention are Terraform's, and the IAM
+  policy omits `logs:CreateLogGroup` so no second group can appear without one.
+- `config/checkmk/README.md` documents the site-side configuration, which cannot
+  be managed with Terraform: no Checkmk provider exists.
 - Composite action `hcp-workspace-state` and a shared plan-report script for
   the workflows.
 - `.terraform-version` pinning Terraform to 1.15.9, so tenv and friends select

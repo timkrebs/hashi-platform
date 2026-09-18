@@ -67,3 +67,8 @@ output "default_storage_class" {
   description = "Name of the default StorageClass, or null when it is not managed here."
   value       = one(kubernetes_storage_class_v1.gp3[*].metadata[0].name)
 }
+
+output "container_log_group" {
+  description = "CloudWatch log group the container logs are written to, or null when log shipping is disabled."
+  value       = one(module.fluent_bit[*].log_group_name)
+}

@@ -130,3 +130,19 @@ variable "dev_cert_max_ttl" {
   type        = string
   default     = "720h"
 }
+
+variable "monitoring_bound_cidrs" {
+  description = "CIDR blocks the monitoring AppRole may be used from. Scoped to the VPC, because the Checkmk host runs inside it; an empty list would let a leaked credential be used from anywhere."
+  type        = list(string)
+  default     = ["10.0.0.0/16"]
+
+  validation {
+    condition     = length(var.monitoring_bound_cidrs) > 0
+    error_message = "monitoring_bound_cidrs must list at least one CIDR, otherwise the credential is usable from anywhere."
+  }
+
+  validation {
+    condition     = alltrue([for cidr in var.monitoring_bound_cidrs : can(cidrnetmask(cidr))])
+    error_message = "monitoring_bound_cidrs must contain valid IPv4 CIDR blocks."
+  }
+}

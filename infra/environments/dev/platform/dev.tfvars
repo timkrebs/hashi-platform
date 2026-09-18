@@ -25,3 +25,7 @@ vault_init_secret_recovery_window_in_days = 0
 # sobald das mehr als eine Sandbox ist.
 argocd_service_type        = "LoadBalancer"
 argocd_allowed_cidr_blocks = ["0.0.0.0/0"]
+
+# Container-Logs nach CloudWatch (Checkmk ist kein Log-Store).
+enable_log_shipping   = true
+log_retention_in_days = 14

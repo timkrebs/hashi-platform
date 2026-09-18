@@ -1,0 +1,51 @@
+# Collectors for the Checkmk Kubernetes special agent.
+#
+# The Checkmk host runs on an EC2 instance in the same VPC, so the cluster
+# collector is published on an *internal* load balancer. Unlike the Argo CD and
+# Vault interfaces there is no reason to expose this one: nothing outside the
+# VPC needs to read container metrics, and the endpoint is unauthenticated
+# unless tlsCommunication is turned on.
+
+clusterCollector:
+  service:
+    type: LoadBalancer
+    port: 8080
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: external
+      service.beta.kubernetes.io/aws-load-balancer-scheme: internal
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+      # The chart exposes no loadBalancerSourceRanges field, so the restriction
+      # goes on as an annotation. Scoped to the VPC, which is where the Checkmk
+      # host lives.
+      service.beta.kubernetes.io/load-balancer-source-ranges: "10.0.0.0/16"
+
+  # Sized for a three-node sandbox; raise cacheMaxsize as the cluster grows.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+nodeCollector:
+  cadvisor:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+  containerMetricsCollector:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+  machineSectionsCollector:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        memory: 256Mi

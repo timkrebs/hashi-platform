@@ -192,6 +192,25 @@ store. Narrow `argocd_allowed_cidr_blocks` in `dev.tfvars` and
 `ui.loadBalancerSourceRanges` in `gitops/values/vault/values.yaml` as soon as
 this is more than a sandbox. Each load balancer also costs roughly $16 a month.
 
+### Monitoring and logs
+
+Metrics and state go to Checkmk, logs go to CloudWatch. That split is not
+arbitrary: Checkmk alerts on patterns in a file an agent can read, but it does
+not store or search log history, so using it as a log destination would be
+using it for something it is not.
+
+| Piece | Where it lives |
+| --- | --- |
+| Kubernetes collectors | `gitops/apps/checkmk-kube-agent.yaml`, internal NLB |
+| Container logs | `gitops/apps/fluent-bit.yaml` + `aws-fluent-bit-cloudwatch` |
+| Vault monitoring AppRole | `config/vault/` |
+| Checkmk site configuration | `config/checkmk/README.md` — by hand, no provider exists |
+
+The log group and its retention belong to Terraform rather than to Fluent Bit's
+auto-create, and the IAM policy deliberately omits `logs:CreateLogGroup`, so a
+misconfigured output cannot silently create a second group that never expires
+and bills forever.
+
 ### Monitoring
 
 The platform layer also runs a Checkmk Raw server on a single EC2 instance in a
