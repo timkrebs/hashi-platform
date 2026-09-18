@@ -19,6 +19,12 @@ variables {
   region            = "us-east-1"
   vpc_id            = "vpc-0123456789abcdef0"
   oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/0123456789ABCDEF"
+
+  tags = {
+    Environment = "Dev"
+    Project     = "hashi-platform"
+    ManagedBy   = "Terraform"
+  }
 }
 
 run "wires_cluster_and_irsa_role_into_chart_values" {
@@ -63,4 +69,25 @@ run "rejects_zero_replicas" {
   }
 
   expect_failures = [var.replica_count]
+}
+
+# The bundled upstream policy is older than the chart's controller version and
+# omits these, which makes every LoadBalancer service hang on <pending>.
+run "listener_attribute_permissions_are_granted" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for action in ["elasticloadbalancing:DescribeListenerAttributes", "elasticloadbalancing:ModifyListenerAttributes"] :
+      contains(jsondecode(aws_iam_policy.listener_attributes.policy).Statement[0].Action, action)
+    ])
+    error_message = "The controller must be allowed to read and modify listener attributes."
+  }
+
+  assert {
+    condition = alltrue([
+      for key in ["Environment", "Project", "ManagedBy"] : contains(keys(aws_iam_policy.listener_attributes.tags), key)
+    ])
+    error_message = "The policy must carry the mandatory tags."
+  }
 }

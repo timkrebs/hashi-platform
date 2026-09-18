@@ -17,6 +17,40 @@ module "irsa" {
   tags = var.tags
 }
 
+# The IAM policy bundled with terraform-aws-modules/iam 5.39.0 predates the
+# controller version this chart installs, so it is missing the listener
+# attribute APIs that LBC 2.8+ calls on every reconcile. Without them the
+# controller builds a correct model and then fails with AccessDenied on
+# DescribeListenerAttributes, and every LoadBalancer service hangs on
+# <pending> with no obvious cause.
+#
+# This closes the gap without dragging in the coordinated provider/module major
+# upgrade; it can be dropped once the upstream module is bumped.
+resource "aws_iam_policy" "listener_attributes" {
+  name        = "${var.cluster_name}-alb-controller-listener-attributes"
+  description = "Listener attribute APIs the bundled load balancer controller policy is missing."
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "ListenerAttributes"
+      Effect = "Allow"
+      Action = [
+        "elasticloadbalancing:DescribeListenerAttributes",
+        "elasticloadbalancing:ModifyListenerAttributes",
+      ]
+      Resource = "*"
+    }]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "listener_attributes" {
+  role       = module.irsa.iam_role_name
+  policy_arn = aws_iam_policy.listener_attributes.arn
+}
+
 resource "helm_release" "this" {
   name       = "aws-load-balancer-controller"
   repository = "https://aws.github.io/eks-charts"

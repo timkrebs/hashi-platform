@@ -7,7 +7,16 @@ because in-cluster workloads (later Boundary workers) rely on it, and because
 it must still be running when those workloads are deleted during a teardown,
 or their load balancers leak.
 
-The IAM policy comes from
+The module attaches one extra IAM policy on top of the bundled one:
+`elasticloadbalancing:DescribeListenerAttributes` and `ModifyListenerAttributes`.
+The policy shipped with terraform-aws-modules/iam 5.39.0 predates the controller
+version this chart installs, and the controller calls those APIs on every
+reconcile. Without them it builds a correct model and then fails with
+`AccessDenied`, leaving every `LoadBalancer` service on `<pending>` with nothing
+in the service description to explain why — the reason only appears in the
+controller log. Drop the extra policy once the upstream module is bumped.
+
+The base IAM policy comes from
 [terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks](https://registry.terraform.io/modules/terraform-aws-modules/iam/aws/5.39.0/submodules/iam-role-for-service-accounts-eks),
 so it stays in step with the controller version.
 
