@@ -100,6 +100,14 @@ for the modules once they are tagged.
   backend namespace, so developers issue their own certificates without ever
   seeing the root key. Passwords are inputs; only the two demo API keys are
   generated. `make check` covers the new root through `CONFIG_DIRS`.
+- `terraform-plan.yml` and `terraform-apply.yml` are replaced by a single
+  `terraform.yml` that runs on pull requests and on pushes to `main`. Its jobs
+  are chained — fmt, tflint, validate, test, policies, resolve, plan, apply — so
+  a failure lands in one named box instead of somewhere inside a combined
+  "static checks" job.
+- The pipeline plans and applies `config/vault` after the platform layer, and
+  posts a speculative Vault plan on pull requests. The stage carries no
+  `-var-file`, and is skipped until the `hashi-platform-vault` workspace exists.
 - Composite action `hcp-workspace-state` and a shared plan-report script for
   the workflows.
 - `.terraform-version` pinning Terraform to 1.15.9, so tenv and friends select

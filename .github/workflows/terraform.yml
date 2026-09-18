@@ -1,0 +1,476 @@
+# The whole Terraform pipeline in one place, so a run reads top to bottom in
+# the Actions UI:
+#
+#   fmt -> tflint -> validate -> test -> policies -> resolve -> plan -> apply
+#
+# The checks are chained rather than run in parallel on purpose: a formatting
+# mistake then produces one red box instead of four, and the first failure
+# names the stage it belongs to. It costs roughly half a minute of runner
+# setup per stage.
+#
+# One environment, dev, with two layers plus a configuration root:
+#   infra/environments/dev/cluster   workspace hashi-platform-dev
+#   infra/environments/dev/platform  workspace hashi-platform-dev-platform
+#   config/vault                     workspace hashi-platform-vault
+#
+# On a pull request everything up to `plan` runs and each layer's plan is
+# posted as its own comment. On a push to main the cluster plan is saved and
+# `apply` applies exactly that saved plan, then plans and applies the platform
+# layer and the Vault configuration inside the same approved job.
+name: Terraform
+
+on:
+  # The two path lists are duplicated on purpose: GitHub Actions does not
+  # support YAML anchors, and a workflow using them is rejected at parse time.
+  pull_request:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - "config/**"
+      - ".tflint.hcl"
+      - ".github/workflows/terraform.yml"
+      - ".github/actions/**"
+      - ".github/scripts/**"
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - "config/**"
+      - ".tflint.hcl"
+      - ".github/workflows/terraform.yml"
+      - ".github/actions/**"
+      - ".github/scripts/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# Pull requests supersede themselves; a merge queues behind the previous merge
+# so two applies never touch the same workspace at once.
+concurrency:
+  group: terraform-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  ENVIRONMENT: dev
+  CLUSTER_DIR: infra/environments/dev/cluster
+  PLATFORM_DIR: infra/environments/dev/platform
+  VAULT_CONFIG_DIR: config/vault
+  VAULT_WORKSPACE: hashi-platform-vault
+  TERRAFORM_VERSION: "~> 1.15.0"
+  TFLINT_VERSION: v0.61.0
+  SENTINEL_VERSION: "0.41.0"
+  SENTINEL_SHA256: "357ca824c9ac3ab11520a5ad2c2547b34aeb01dd4e3b9f1c7dc325d0be8a9935"
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+
+jobs:
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: terraform fmt
+        run: terraform fmt -check -recursive -diff infra config
+
+  tflint:
+    name: tflint
+    runs-on: ubuntu-latest
+    needs: fmt
+    steps:
+      - uses: actions/checkout@v7
+      - uses: terraform-linters/setup-tflint@v6
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+          github_token: ${{ github.token }}
+      - name: tflint
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          tflint --init --config "$PWD/.tflint.hcl"
+          for dir in infra/modules/*/ infra/environments/*/*/ config/*/; do
+            [ -f "${dir}main.tf" ] || continue
+            echo "::group::${dir}"
+            tflint --chdir="${dir}" --config "$PWD/.tflint.hcl" --format compact
+            echo "::endgroup::"
+          done
+
+  validate:
+    name: validate
+    runs-on: ubuntu-latest
+    needs: tflint
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: terraform validate
+        run: |
+          for dir in infra/modules/*/ infra/environments/*/*/ config/*/; do
+            [ -f "${dir}main.tf" ] || continue
+            echo "::group::${dir}"
+            terraform -chdir="${dir}" init -backend=false
+            terraform -chdir="${dir}" validate
+            echo "::endgroup::"
+          done
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: terraform test
+        run: |
+          for module in infra/modules/*/; do
+            echo "::group::${module}"
+            terraform -chdir="${module}" init -backend=false
+            terraform -chdir="${module}" test
+            echo "::endgroup::"
+          done
+
+  policies:
+    name: policies
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Sentinel
+        run: |
+          curl -fsSLo sentinel.zip "https://releases.hashicorp.com/sentinel/${SENTINEL_VERSION}/sentinel_${SENTINEL_VERSION}_linux_amd64.zip"
+          echo "${SENTINEL_SHA256}  sentinel.zip" | sha256sum -c -
+          unzip -q sentinel.zip -d "${RUNNER_TEMP}/sentinel"
+          echo "${RUNNER_TEMP}/sentinel" >> "$GITHUB_PATH"
+      - name: sentinel
+        working-directory: infra/policies
+        run: |
+          sentinel fmt -check -write=false ./*.sentinel ./testdata/*.sentinel
+          sentinel test -verbose
+
+  resolve:
+    name: resolve
+    runs-on: ubuntu-latest
+    needs: policies
+    outputs:
+      cluster_ready: ${{ steps.layers.outputs.cluster_ready }}
+      platform_ready: ${{ steps.layers.outputs.platform_ready }}
+      vault_ready: ${{ steps.layers.outputs.vault_ready }}
+      cluster_has_state: ${{ steps.cluster_state.outputs.has_state }}
+      vault_workspace_exists: ${{ steps.vault_workspace.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: layers
+        run: |
+          for layer in cluster platform; do
+            directory="infra/environments/${ENVIRONMENT}/${layer}"
+            if [ -f "${directory}/main.tf" ]; then
+              echo "${layer}_ready=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "${layer}_ready=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::${directory}/main.tf does not exist; the ${layer} layer is skipped."
+            fi
+          done
+
+          if [ -f "${VAULT_CONFIG_DIR}/main.tf" ]; then
+            echo "vault_ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "vault_ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${VAULT_CONFIG_DIR}/main.tf does not exist; the Vault configuration is skipped."
+          fi
+
+      # The platform layer talks to the cluster, so it can only be planned once
+      # the cluster workspace holds resources.
+      - id: cluster_state
+        uses: ./.github/actions/hcp-workspace-state
+        with:
+          workspace: hashi-platform-${{ env.ENVIRONMENT }}
+          token: ${{ secrets.TF_API_TOKEN }}
+
+      # Skipped until the workspace exists and has its variables, so adding the
+      # configuration cannot break the pipeline before HCP Terraform is ready.
+      - id: vault_workspace
+        uses: ./.github/actions/hcp-workspace-state
+        with:
+          workspace: ${{ env.VAULT_WORKSPACE }}
+          token: ${{ secrets.TF_API_TOKEN }}
+
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    needs: resolve
+    if: needs.resolve.outputs.cluster_ready == 'true' || needs.resolve.outputs.platform_ready == 'true'
+    outputs:
+      changes: ${{ steps.plan_cluster.outputs.changes }}
+      run_url: ${{ steps.plan_cluster.outputs.run_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      # On a push the plan is saved with -out, which creates an applyable run in
+      # HCP Terraform that `apply` consumes verbatim. On a pull request it stays
+      # speculative and can never be applied.
+      - name: Plan cluster layer
+        id: plan_cluster
+        if: needs.resolve.outputs.cluster_ready == 'true'
+        working-directory: ${{ env.CLUSTER_DIR }}
+        run: |
+          terraform init
+          set +e
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            terraform plan -no-color -detailed-exitcode -var-file="${ENVIRONMENT}.tfvars" 2>&1 | tee plan.txt
+          else
+            terraform plan -no-color -detailed-exitcode -out=tfplan -var-file="${ENVIRONMENT}.tfvars" 2>&1 | tee plan.txt
+          fi
+          exit_code=${PIPESTATUS[0]}
+          set -e
+
+          run_url=$(grep -Eo 'https://app\.terraform\.io/app/[^[:space:]]+' plan.txt | head -n 1 || true)
+          echo "run_url=${run_url}" >> "$GITHUB_OUTPUT"
+          case "${exit_code}" in
+            0) echo "changes=false" >> "$GITHUB_OUTPUT" ;;
+            2) echo "changes=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "changes=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+          if [ "${exit_code}" != "0" ] && [ "${exit_code}" != "2" ]; then
+            exit "${exit_code}"
+          fi
+
+      - name: Cluster plan report
+        if: always() && steps.plan_cluster.outcome != 'skipped'
+        env:
+          LAYER: cluster
+          PLAN_OUTCOME: ${{ steps.plan_cluster.outcome }}
+        working-directory: ${{ env.CLUSTER_DIR }}
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/plan-report.sh" plan.txt "${GITHUB_WORKSPACE}/plan-report-cluster.md"
+
+      - name: Upload saved plan
+        if: github.event_name != 'pull_request' && steps.plan_cluster.outputs.changes == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tfplan-dev-cluster-${{ github.sha }}
+          path: ${{ env.CLUSTER_DIR }}/tfplan
+          retention-days: 1
+          if-no-files-found: error
+
+      # The platform layer and the Vault configuration are only planned here for
+      # review. On a push they are planned again inside `apply`, because their
+      # Kubernetes and Vault tokens are short lived and would expire while a
+      # reviewer waits.
+      - name: Plan platform layer
+        id: plan_platform
+        if: github.event_name == 'pull_request' && needs.resolve.outputs.platform_ready == 'true' && needs.resolve.outputs.cluster_has_state == 'true' && steps.plan_cluster.outcome != 'failure'
+        working-directory: ${{ env.PLATFORM_DIR }}
+        run: |
+          terraform init
+          terraform plan -no-color -var-file="${ENVIRONMENT}.tfvars" 2>&1 | tee plan.txt
+
+      - name: Platform plan report
+        if: always() && steps.plan_platform.outcome != 'skipped'
+        env:
+          LAYER: platform
+          PLAN_OUTCOME: ${{ steps.plan_platform.outcome }}
+        working-directory: ${{ env.PLATFORM_DIR }}
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/plan-report.sh" plan.txt "${GITHUB_WORKSPACE}/plan-report-platform.md"
+
+      # No -var-file: the address, token and passwords are variables on the
+      # hashi-platform-vault workspace, and the passwords must not live in a
+      # file in this repository.
+      - name: Plan Vault configuration
+        id: plan_vault
+        if: github.event_name == 'pull_request' && needs.resolve.outputs.vault_ready == 'true' && needs.resolve.outputs.vault_workspace_exists == 'true'
+        working-directory: ${{ env.VAULT_CONFIG_DIR }}
+        run: |
+          terraform init
+          terraform plan -no-color 2>&1 | tee plan.txt
+
+      - name: Vault plan report
+        if: always() && steps.plan_vault.outcome != 'skipped'
+        env:
+          LAYER: vault
+          PLAN_OUTCOME: ${{ steps.plan_vault.outcome }}
+        working-directory: ${{ env.VAULT_CONFIG_DIR }}
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/plan-report.sh" plan.txt "${GITHUB_WORKSPACE}/plan-report-vault.md"
+
+      - name: Note skipped plans
+        if: github.event_name == 'pull_request'
+        run: |
+          if [ "${{ needs.resolve.outputs.platform_ready }}" = "true" ] && [ "${{ needs.resolve.outputs.cluster_has_state }}" != "true" ]; then
+            echo "::notice::Platform layer not planned: workspace hashi-platform-${ENVIRONMENT} holds no resources yet. Apply the cluster layer first."
+          fi
+          if [ "${{ needs.resolve.outputs.vault_ready }}" = "true" ] && [ "${{ needs.resolve.outputs.vault_workspace_exists }}" != "true" ]; then
+            echo "::notice::Vault configuration not planned: workspace ${VAULT_WORKSPACE} does not exist yet."
+          fi
+
+      # One comment per layer, updated in place on every push to the branch.
+      - name: Comment on pull request
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100,
+            });
+
+            for (const layer of ['cluster', 'platform', 'vault']) {
+              const path = `plan-report-${layer}.md`;
+              if (!fs.existsSync(path)) continue;
+              const body = fs.readFileSync(path, 'utf8');
+              const marker = `<!-- terraform-plan:${layer} -->`;
+              const existing = comments.find((c) => c.body && c.body.includes(marker));
+              if (existing) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+              } else {
+                await github.rest.issues.createComment({ owner, repo, issue_number, body });
+              }
+            }
+
+  apply:
+    name: apply
+    runs-on: ubuntu-latest
+    needs: [resolve, plan]
+    # Never on a pull request: those plans are speculative and cannot be applied.
+    if: >-
+      github.event_name != 'pull_request' &&
+      needs.plan.result == 'success' &&
+      (needs.plan.outputs.changes == 'true' ||
+       needs.resolve.outputs.platform_ready == 'true' ||
+       (needs.resolve.outputs.vault_ready == 'true' && needs.resolve.outputs.vault_workspace_exists == 'true'))
+    # Protection rules live on the "dev" GitHub environment. Rejecting here
+    # leaves the HCP run in "planned and saved"; discard it in the HCP UI.
+    environment:
+      name: dev
+      url: ${{ needs.plan.outputs.run_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      # ---- cluster: apply exactly the plan that was reviewed ------------------
+      - uses: actions/download-artifact@v8
+        if: needs.plan.outputs.changes == 'true'
+        with:
+          name: tfplan-dev-cluster-${{ github.sha }}
+          path: ${{ env.CLUSTER_DIR }}
+
+      - name: Apply cluster layer
+        if: needs.plan.outputs.changes == 'true'
+        working-directory: ${{ env.CLUSTER_DIR }}
+        run: |
+          terraform init
+          terraform apply -no-color tfplan 2>&1 | tee apply.txt
+          {
+            echo "### Apply: cluster"
+            echo
+            echo "**$(grep -E '^(Apply complete!|Error:)' apply.txt | head -n 1 || echo 'See output below')**"
+            echo
+            echo "<details><summary>Apply output</summary>"
+            echo
+            echo '```text'
+            cat apply.txt
+            echo '```'
+            echo
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ---- platform: fresh plan, then apply if it has changes -----------------
+      - name: Plan platform layer
+        id: plan_platform
+        if: needs.resolve.outputs.platform_ready == 'true'
+        working-directory: ${{ env.PLATFORM_DIR }}
+        run: |
+          terraform init
+          set +e
+          terraform plan -no-color -detailed-exitcode -var-file="${ENVIRONMENT}.tfvars" 2>&1 | tee plan.txt
+          exit_code=${PIPESTATUS[0]}
+          set -e
+          case "${exit_code}" in
+            0) echo "changes=false" >> "$GITHUB_OUTPUT" ;;
+            2) echo "changes=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "changes=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+          if [ "${exit_code}" != "0" ] && [ "${exit_code}" != "2" ]; then
+            exit "${exit_code}"
+          fi
+
+      - name: Apply platform layer
+        if: needs.resolve.outputs.platform_ready == 'true' && steps.plan_platform.outputs.changes == 'true'
+        working-directory: ${{ env.PLATFORM_DIR }}
+        run: |
+          terraform apply -no-color -auto-approve -var-file="${ENVIRONMENT}.tfvars" 2>&1 | tee apply.txt
+          {
+            echo "### Apply: platform"
+            echo
+            echo "**$(grep -E '^(Apply complete!|Error:)' apply.txt | head -n 1 || echo 'See output below')**"
+            echo
+            echo "<details><summary>Apply output</summary>"
+            echo
+            echo '```text'
+            cat apply.txt
+            echo '```'
+            echo
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ---- Vault configuration last: it configures what Argo CD deployed ------
+      - name: Plan Vault configuration
+        id: plan_vault
+        if: needs.resolve.outputs.vault_ready == 'true' && needs.resolve.outputs.vault_workspace_exists == 'true'
+        working-directory: ${{ env.VAULT_CONFIG_DIR }}
+        run: |
+          terraform init
+          set +e
+          terraform plan -no-color -detailed-exitcode 2>&1 | tee plan.txt
+          exit_code=${PIPESTATUS[0]}
+          set -e
+          case "${exit_code}" in
+            0) echo "changes=false" >> "$GITHUB_OUTPUT" ;;
+            2) echo "changes=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "changes=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+          if [ "${exit_code}" != "0" ] && [ "${exit_code}" != "2" ]; then
+            echo "::error::Planning the Vault configuration failed. If this is a rebuilt environment, Vault is probably not initialised yet: sync it through Argo CD, run 'vault operator init', then refresh vault_token on the ${VAULT_WORKSPACE} workspace."
+            exit "${exit_code}"
+          fi
+
+      - name: Apply Vault configuration
+        if: needs.resolve.outputs.vault_ready == 'true' && steps.plan_vault.outputs.changes == 'true'
+        working-directory: ${{ env.VAULT_CONFIG_DIR }}
+        run: |
+          terraform apply -no-color -auto-approve 2>&1 | tee apply.txt
+          {
+            echo "### Apply: vault configuration"
+            echo
+            echo "**$(grep -E '^(Apply complete!|Error:)' apply.txt | head -n 1 || echo 'See output below')**"
+            echo
+            echo "<details><summary>Apply output</summary>"
+            echo
+            echo '```text'
+            cat apply.txt
+            echo '```'
+            echo
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"

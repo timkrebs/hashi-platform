@@ -1,7 +1,6 @@
 # hashi-platform
 
-[![Terraform plan](https://github.com/timkrebs/hashi-platform/actions/workflows/terraform-plan.yml/badge.svg)](https://github.com/timkrebs/hashi-platform/actions/workflows/terraform-plan.yml)
-[![Terraform apply](https://github.com/timkrebs/hashi-platform/actions/workflows/terraform-apply.yml/badge.svg)](https://github.com/timkrebs/hashi-platform/actions/workflows/terraform-apply.yml)
+[![Terraform](https://github.com/timkrebs/hashi-platform/actions/workflows/terraform.yml/badge.svg)](https://github.com/timkrebs/hashi-platform/actions/workflows/terraform.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 An opinionated Kubernetes platform on AWS, built from reusable Terraform

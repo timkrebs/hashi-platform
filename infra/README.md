@@ -280,29 +280,33 @@ asking HCP Terraform (through the composite action
 `.github/actions/hcp-workspace-state`) whether the cluster workspace holds
 resources.
 
-**`terraform-plan.yml`** runs on pull requests into `main`:
+**`terraform.yml`** is the whole pipeline, and its jobs are chained so a run
+reads top to bottom in the Actions UI:
 
-1. `terraform fmt -check`, `tflint`, `terraform validate` and
-   `terraform test` for every module, and `terraform validate` for each
-   layer; Sentinel policy tests.
-2. A speculative plan in HCP Terraform per layer. The platform layer is only
-   planned once the cluster workspace holds resources. Each layer's result is
-   posted as its own comment on the pull request (updated on every push) and
-   in the job summary, with a link to the HCP run.
+```text
+fmt -> tflint -> validate -> test -> policies -> resolve -> plan -> apply
+```
 
-**`terraform-apply.yml`** runs on pushes to `main` (so, on merge) and on
-manual dispatch:
+The checks are sequential rather than parallel on purpose: a formatting mistake
+produces one red box instead of four, and the first failure names the stage it
+belongs to. It costs roughly half a minute of runner setup per stage.
 
-1. `terraform plan -out=tfplan` for the cluster layer, which creates an
-   applyable run in HCP Terraform.
-2. One job bound to the `dev` GitHub environment, so required
-   reviewers and wait timers configured there gate everything below: it
-   applies exactly the saved cluster plan (skipped when that plan had no
-   changes), then plans and applies the platform layer back to back. The
-   platform layer never uses a saved plan because its Kubernetes token is
-   only valid for about 15 minutes and would expire while a reviewer waits.
-   The job runs whenever the cluster plan has changes or a platform layer
-   exists, so platform-only changes still deploy.
+On a **pull request** it stops after `plan`. Each layer is planned
+speculatively — cluster, platform, and the Vault configuration — and posted as
+its own comment, updated in place on every push to the branch. The platform
+layer is only planned once the cluster workspace holds resources, and the Vault
+configuration only once its workspace exists.
+
+On a **push to main** the cluster plan is saved with `-out`, and `apply` runs
+behind the `dev` GitHub environment: it applies exactly that saved plan, then
+plans and applies the platform layer and the Vault configuration in the same
+approved job. Those two are replanned there rather than reusing a saved plan,
+because their Kubernetes and Vault tokens are short lived and would expire
+while a reviewer waits.
+
+The Vault stage carries no `-var-file`: its address, token and the three
+passwords are variables on the `hashi-platform-vault` workspace, and the
+passwords must not live in a file in this repository.
 
 **`terraform-destroy.yml`** runs on manual dispatch only; type `dev` in the
 confirmation field to arm it. It destroys the platform layer first, then the
@@ -423,9 +427,9 @@ The repository deliberately runs a single environment. To add a second one:
    that does not overlap with dev (`10.0.0.0/16`) and size the node groups.
 6. Add `!infra/environments/<name>/*/<name>.tfvars` to the root `.gitignore`,
    next to the existing exception.
-7. Parameterise the `ENVIRONMENT` variable in `terraform-plan.yml`,
-   `terraform-apply.yml` and `terraform-destroy.yml`, which currently hard-code
-   `dev`, and decide how a run picks between the environments.
+7. Parameterise the `ENVIRONMENT` variable in `terraform.yml` and
+   `terraform-destroy.yml`, which currently hard-code `dev`, and decide how a
+   run picks between the environments.
 
 ## Testing the modules
 

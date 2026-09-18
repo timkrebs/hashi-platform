@@ -5,7 +5,7 @@
 # environment, so no promotion flow can trigger a teardown by itself.
 #
 # The destroy job is bound to the "dev" GitHub environment, so any protection
-# rules configured there gate it, and it shares the apply workflow's
+# rules configured there gate it, and it shares terraform.yml's
 # concurrency group, so a push that lands during the destroy queues behind it
 # and recreates the environment afterwards.
 #
@@ -49,8 +49,10 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: dev
+    # Must match the group in terraform.yml, or a destroy could run at the same
+    # time as an apply against the same workspaces.
     concurrency:
-      group: terraform-apply-dev
+      group: terraform-main
       cancel-in-progress: false
     env:
       LAYER_SELECTION: ${{ inputs.layer || 'all' }}
