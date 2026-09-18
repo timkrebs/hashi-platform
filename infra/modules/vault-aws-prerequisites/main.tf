@@ -38,7 +38,7 @@ resource "aws_iam_policy" "unseal" {
 
 module "unseal_irsa" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc"
-  version = "5.39.0"
+  version = "5.60.0"
 
   create_role                   = true
   role_name                     = "${var.name_prefix}-vault-unseal"
@@ -84,7 +84,7 @@ resource "aws_iam_policy" "init" {
 
 module "init_irsa" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc"
-  version = "5.39.0"
+  version = "5.60.0"
 
   create_role                   = true
   role_name                     = "${var.name_prefix}-vault-init"
