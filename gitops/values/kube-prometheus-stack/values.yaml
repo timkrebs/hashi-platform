@@ -1,0 +1,127 @@
+# Sized for three t3.medium nodes. Prometheus is the memory-hungry part; raising
+# retention is the first thing that will push this cluster over.
+
+grafana:
+  enabled: true
+
+  # Reachable from the internet over its own load balancer, like the Argo CD and
+  # Vault interfaces. Grafana terminates no TLS of its own, so this is plain
+  # HTTP -- see the note in infra/README.md before putting anything real behind
+  # this login.
+  service:
+    type: LoadBalancer
+    port: 80
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: external
+      service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+
+  # The admin password is generated into a secret by the chart on first install.
+  # Read it with:
+  #   kubectl get secret kube-prometheus-stack-grafana -n observability \
+  #     -o jsonpath='{.data.admin-password}' | base64 -d
+  adminPassword: ""
+
+  persistence:
+    enabled: true
+    size: 5Gi
+
+  # Loki is added as a datasource here rather than in the Loki chart, because
+  # this is where Grafana lives.
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      access: proxy
+      url: http://loki-gateway.observability.svc.cluster.local
+      jsonData:
+        maxLines: 1000
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 192Mi
+    limits:
+      memory: 512Mi
+
+prometheus:
+  prometheusSpec:
+    retention: 7d
+    retentionSize: 8GB
+
+    # Without this the operator only picks up ServiceMonitors the chart itself
+    # labels, and the Vault scrape below would be ignored.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+
+    resources:
+      requests:
+        cpu: 200m
+        memory: 768Mi
+      limits:
+        memory: 1536Mi
+
+    # Vault serves metrics on a second listener that is reachable only inside
+    # the cluster. Scraping the pods directly keeps that traffic off the
+    # internet-facing load balancer.
+    additionalScrapeConfigs:
+      - job_name: vault
+        metrics_path: /v1/sys/metrics
+        params:
+          format: [prometheus]
+        scheme: http
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: [vault]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+            action: keep
+            regex: vault
+          - source_labels: [__meta_kubernetes_pod_label_component]
+            action: keep
+            regex: server
+          # One target per pod on the metrics listener. Addressing the pod IP
+          # directly rather than filtering on a declared container port: the
+          # chart does not declare 8202, so a port filter would match nothing.
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "$1:8202"
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: instance
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        memory: 192Mi
+
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 384Mi
+
+# The EKS control plane is managed by AWS: these components are not reachable
+# and their ServiceMonitors would alert forever.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false

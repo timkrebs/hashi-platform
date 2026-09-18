@@ -1,8 +1,10 @@
 # gitops/apps/fluent-bit.yaml
 #
-# Ships container logs to CloudWatch. Deliberately not to Checkmk: Checkmk
-# alerts on patterns in a file an agent can read, it does not store or search
-# log history.
+# Ships container logs to CloudWatch as a durable archive that outlives the
+# cluster. Interactive log search happens in Loki, which lives inside the
+# cluster and goes away with it. Keeping both is a deliberate duplication; drop
+# this Application and enable_log_shipping if the archive is not worth the
+# CloudWatch bill.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

@@ -10,23 +10,8 @@ variable "enable_cert_manager" {
   default     = true
 }
 
-variable "enable_checkmk" {
-  description = "Create the Checkmk monitoring server on EC2."
-  type        = bool
-  default     = true
-}
 
-variable "checkmk_instance_type" {
-  description = "EC2 instance type for the Checkmk server. The restrict-compute-size policy caps this at medium."
-  type        = string
-  default     = "t3.medium"
-}
 
-variable "checkmk_allowed_cidr_blocks" {
-  description = "CIDR blocks allowed to reach the Checkmk web interface. Defaults to the whole internet, and the certificate is self-signed, so narrow this where you can."
-  type        = list(string)
-  default     = ["0.0.0.0/0"]
-}
 
 variable "enable_argocd" {
   description = "Install Argo CD. Its Applications are not managed here: apply gitops/bootstrap/root-app.yaml once, then everything under gitops/apps is reconciled from Git."
@@ -99,7 +84,7 @@ variable "argocd_allowed_cidr_blocks" {
 }
 
 variable "enable_log_shipping" {
-  description = "Ship container logs to CloudWatch Logs with Fluent Bit. Checkmk handles metrics and state; it is not a log store, so the logs go where they can be searched."
+  description = "Ship container logs to CloudWatch Logs with Fluent Bit, as a durable archive that outlives the cluster. Interactive log search runs on Loki inside the cluster; keeping both is a deliberate duplication."
   type        = bool
   default     = true
 }

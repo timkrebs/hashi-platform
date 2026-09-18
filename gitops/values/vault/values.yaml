@@ -96,6 +96,21 @@ server:
           tls_client_ca_file = "/vault/tls/ca.crt"
         }
 
+        # Metrics listener, cluster-internal only. The load balancer publishes
+        # 8200 and nothing else, so this port is reachable from inside the
+        # cluster and nowhere else. That is what makes
+        # unauthenticated_metrics_access defensible here: on the 8200 listener
+        # it would put seal state, token counts and request rates on the open
+        # internet, which is why the scrape does not go through that one.
+        listener "tcp" {
+          address     = "[::]:8202"
+          tls_disable = true
+
+          telemetry {
+            unauthenticated_metrics_access = true
+          }
+        }
+
         storage "raft" {
           path = "/vault/data"
 

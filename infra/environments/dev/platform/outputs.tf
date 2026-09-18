@@ -8,30 +8,10 @@ output "cert_manager_namespace" {
   value       = one(module.cert_manager[*].namespace)
 }
 
-output "checkmk_url" {
-  description = "URL of the Checkmk web interface, or null when the server is disabled. The certificate is self-signed."
-  value       = one(module.checkmk[*].url)
-}
 
-output "checkmk_public_ip" {
-  description = "Elastic IP of the Checkmk server."
-  value       = one(module.checkmk[*].public_ip)
-}
 
-output "checkmk_instance_id" {
-  description = "Instance ID of the Checkmk server."
-  value       = one(module.checkmk[*].instance_id)
-}
 
-output "checkmk_admin_password_command" {
-  description = "Command that prints the initial cmkadmin password from SSM Parameter Store."
-  value       = one(module.checkmk[*].admin_password_command)
-}
 
-output "checkmk_session_manager_command" {
-  description = "Command that opens a shell on the Checkmk server through SSM Session Manager."
-  value       = one(module.checkmk[*].session_manager_command)
-}
 
 output "argocd_port_forward" {
   description = "Command that exposes the Argo CD UI on http://localhost:8080."

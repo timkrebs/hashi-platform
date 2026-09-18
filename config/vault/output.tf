@@ -41,13 +41,3 @@ output "frontend_api_key_command" {
 # The demo keys themselves are deliberately not outputs: they live in Vault,
 # which is the point of the exercise, and an output would copy them into the
 # HCP run view.
-
-output "checkmk_approle_role_id" {
-  description = "Role ID of the monitoring AppRole. Not a secret on its own; it needs a secret ID to log in."
-  value       = vault_approle_auth_backend_role.checkmk.role_id
-}
-
-output "checkmk_secret_id_command" {
-  description = "Creates a secret ID for the monitoring AppRole. Run it out of band: generating one in Terraform would put a long-lived credential into state."
-  value       = "vault write -f auth/${vault_auth_backend.approle.path}/role/${vault_approle_auth_backend_role.checkmk.role_name}/secret-id"
-}

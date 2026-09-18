@@ -5,11 +5,6 @@ region = "us-east-1"
 
 enable_cert_manager = true
 
-# Checkmk is reachable from anywhere over HTTPS with a self-signed certificate.
-# Narrow this to an office or VPN range when the sandbox becomes more than that.
-enable_checkmk              = true
-checkmk_instance_type       = "t3.medium"
-checkmk_allowed_cidr_blocks = ["0.0.0.0/0"]
 
 # Argo CD plus the AWS resources Vault needs. Vault itself is deployed from
 # gitops/, not from here.
@@ -26,6 +21,7 @@ vault_init_secret_recovery_window_in_days = 0
 argocd_service_type        = "LoadBalancer"
 argocd_allowed_cidr_blocks = ["0.0.0.0/0"]
 
-# Container-Logs nach CloudWatch (Checkmk ist kein Log-Store).
+# Container-Logs zusaetzlich nach CloudWatch als dauerhaftes Archiv.
+# Interaktive Suche laeuft ueber Loki im Cluster.
 enable_log_shipping   = true
 log_retention_in_days = 14

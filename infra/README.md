@@ -14,7 +14,6 @@ infra/
 │   ├── aws-eks-cluster/               # EKS control plane, managed node groups, EBS CSI IRSA
 │   ├── aws-load-balancer-controller/  # NLB/ALB controller with IRSA (platform layer)
 │   ├── cert-manager/                  # certificates for in-cluster TLS (platform layer)
-│   ├── aws-checkmk-server/            # Checkmk Raw monitoring server on EC2 (platform layer)
 │   └── boundary/                      # HCP Boundary placeholder, disabled
 ├── policies/                          # Sentinel policy set evaluated by HCP Terraform
 └── environments/
@@ -31,8 +30,7 @@ There is one environment, `dev`, with two root modules applied in this order:
    `aws-eks-cluster`. Its outputs (API endpoint, CA, OIDC provider, VPC id,
    account id) reach the next layer through HCP Terraform remote state.
 2. **`platform/`** installs the in-cluster add-ons workloads depend on — the
-   AWS Load Balancer Controller (with IRSA) and cert-manager — plus the Checkmk
-   monitoring server on EC2. Secrets are served by HCP Vault Dedicated, which
+   AWS Load Balancer Controller (with IRSA) and cert-manager. Secrets are served by HCP Vault Dedicated, which
    runs outside this configuration and is not managed by Terraform here.
 
 ```hcl
@@ -69,8 +67,7 @@ modules never reference each other directly.
 ### Hardened node images
 
 Both EC2 estates run on the company's hardened images from the ami-prod account
-(`888995627335`) for compliance: the Checkmk server on
-`hc-base-ubuntu-2404-amd64-*`, and the EKS node groups on
+(`888995627335`) for compliance: the EKS node groups run on
 `hc-base-ubuntu-2404-eks-<version>-amd64-*`.
 
 Because those nodes are Ubuntu, kubelet is pointed away from the
@@ -202,44 +199,48 @@ at leisure.
 
 ### Monitoring and logs
 
-Metrics and state go to Checkmk, logs go to CloudWatch. That split is not
-arbitrary: Checkmk alerts on patterns in a file an agent can read, but it does
-not store or search log history, so using it as a log destination would be
-using it for something it is not.
+Everything runs inside the cluster and is reconciled by Argo CD, like every
+other workload here.
 
-| Piece | Where it lives |
-| --- | --- |
-| Kubernetes collectors | `gitops/apps/checkmk-kube-agent.yaml`, internal NLB |
-| Container logs | `gitops/apps/fluent-bit.yaml` + `aws-fluent-bit-cloudwatch` |
-| Vault monitoring AppRole | `config/vault/` |
-| Checkmk site configuration | `config/checkmk/README.md` — by hand, no provider exists |
+| Piece | Chart | What it does |
+| --- | --- | --- |
+| `kube-prometheus-stack` | 91.4.1 | Prometheus, Alertmanager, node-exporter, kube-state-metrics **and Grafana** |
+| `loki` | 7.3.0 | Log store, single binary on a filesystem PVC |
+| `alloy` | 1.12.1 | Reads container logs off each node and writes them to Loki |
 
-The log group and its retention belong to Terraform rather than to Fluent Bit's
-auto-create, and the IAM policy deliberately omits `logs:CreateLogGroup`, so a
-misconfigured output cannot silently create a second group that never expires
-and bills forever.
-
-### Monitoring
-
-The platform layer also runs a Checkmk Raw server on a single EC2 instance in a
-public subnet, installed and configured at first boot:
+Grafana comes from the Prometheus chart rather than its own, so the datasource
+and the Kubernetes dashboards are wired up by the chart instead of by hand. Loki
+is added as a second datasource in the same values file.
 
 ```sh
-terraform output -raw checkmk_url                     # https://<eip>/cmk/
-eval "$(terraform output -raw checkmk_admin_password_command)"
+kubectl get svc kube-prometheus-stack-grafana -n observability \
+  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}{"\n"}'
+kubectl get secret kube-prometheus-stack-grafana -n observability \
+  -o jsonpath='{.data.admin-password}' | base64 -d
 ```
 
-The interface is open to the internet over HTTPS with a **self-signed**
-certificate, so browsers warn on the first visit; narrow
-`checkmk_allowed_cidr_blocks` in `dev.tfvars` where you can. Shell access is
-through SSM Session Manager, not SSH.
+**Grafana speaks plain HTTP.** Unlike Argo CD and Vault it terminates no TLS of
+its own, so the load balancer publishes it unencrypted and the login crosses the
+internet in clear. Acceptable for a sandbox, not for anything else: put an ALB
+with an ACM certificate in front, or narrow the service to known source ranges,
+before this holds anything worth taking.
 
-Two consequences of it living in the platform layer are worth knowing. It only
-needs the VPC, yet the layer cannot plan at all without the EKS cluster, because
-`data.aws_eks_cluster_auth` reads a live cluster. And the workspace auto-destroys
-after a day without runs, which takes the monitoring history with it. If the
-server should outlive the cluster, move it to the `cluster/` layer, which has the
-VPC, no Kubernetes providers and a two-day window.
+**Vault metrics** are scraped from a second listener on port 8202 that exists
+only inside the cluster. `unauthenticated_metrics_access` is on for that
+listener and stays off for 8200: the load balancer publishes 8200 to the
+internet, where seal state, token counts and request rates have no business
+being. Prometheus addresses the pod IPs directly, because the chart declares no
+container port for 8202.
+
+**Retention** is seven days on both sides, and both live on PVCs inside the
+cluster — destroying the environment destroys the history with it. The
+CloudWatch copy from `aws-fluent-bit-cloudwatch` is the part that survives;
+keeping both is a deliberate duplication, and dropping the CloudWatch side is
+one variable.
+
+Components AWS manages on the EKS control plane — controller manager, scheduler,
+etcd, kube-proxy — have their ServiceMonitors disabled. They are not reachable,
+so they would alert forever.
 
 ## Branch, environment and workspaces
 
@@ -488,7 +489,10 @@ tflint --recursive --config "$PWD/.tflint.hcl"
 | terraform-aws-modules/iam/aws (assumable-role-oidc, irsa-eks)     | 5.39.0  |
 | Helm chart eks/aws-load-balancer-controller                       | 3.5.0   |
 | Helm chart jetstack/cert-manager                                  | 1.21.1  |
-| Checkmk Raw Edition (.deb, Ubuntu 24.04 noble)                    | 2.4.0p36|
+| Helm chart prometheus-community/kube-prometheus-stack             | 91.4.1  |
+| Helm chart grafana/loki                                           | 7.3.0   |
+| Helm chart grafana/alloy                                          | 1.12.1  |
+| Helm chart aws/aws-for-fluent-bit                                 | 0.2.0   |
 | Hardened base image (ami-prod `888995627335`)                     | latest  |
 
 These are pinned inside the modules. Bump them there and run the unit tests
@@ -503,7 +507,4 @@ blocks that 6.0 dropped. In the other direction `eks` 21.x requires
 `aws >= 6.59`. Neither bump works alone, so Dependabot groups them as
 `aws-stack` and proposes one coordinated pull request; a provider major means
 reviewing the upstream modules' own major upgrade guides at the same time. Dependabot tracks neither Helm charts
-nor the Checkmk package; bump them by hand. Checkmk additionally pins the
-package checksum, which has to be refreshed from the `.hash` sidecar in the same
-change — see the
-[module README](modules/aws-checkmk-server/README.md#upgrading-checkmk).
+nor the observability charts; bump those by hand.

@@ -1,7 +1,6 @@
-# Ships container logs to CloudWatch Logs. Checkmk is a monitoring system, not
-# a log store: it can alert on patterns in a file an agent can read, but it
-# offers no searchable log history. Keeping the logs in CloudWatch and the
-# metrics in Checkmk plays to what each one is actually good at.
+# Ships container logs to CloudWatch Logs as a durable archive. Interactive
+# search happens in Loki inside the cluster; this is the copy that survives the
+# cluster being rebuilt.
 
 # Created here, not by Fluent Bit's auto-create, so the retention is explicit.
 # An auto-created group keeps everything forever and bills for it.

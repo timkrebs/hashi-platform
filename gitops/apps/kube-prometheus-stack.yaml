@@ -1,0 +1,49 @@
+# gitops/apps/kube-prometheus-stack.yaml
+#
+# Prometheus, Alertmanager, node-exporter, kube-state-metrics and Grafana.
+# Grafana is bundled here rather than installed separately so that the
+# Prometheus datasource and the Kubernetes dashboards are wired up by the chart
+# instead of by hand.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  project: default
+  sources:
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: 91.4.1
+      helm:
+        releaseName: kube-prometheus-stack
+        # The chart ships large CRDs; without this the apply exceeds the
+        # annotation size limit that client-side apply imposes.
+        skipCrds: false
+        valueFiles:
+          - $values/gitops/values/kube-prometheus-stack/values.yaml
+    - repoURL: https://github.com/timkrebs/hashi-platform.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    # The operator writes caBundle into its own webhooks at runtime.
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+      jqPathExpressions:
+        - .webhooks[]?.clientConfig.caBundle
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      jqPathExpressions:
+        - .webhooks[]?.clientConfig.caBundle

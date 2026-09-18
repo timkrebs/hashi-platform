@@ -116,23 +116,24 @@ for the modules once they are tagged.
 - The pipeline plans and applies `config/vault` after the platform layer, and
   posts a speculative Vault plan on pull requests. The stage carries no
   `-var-file`, and is skipped until the `hashi-platform-vault` workspace exists.
-- Checkmk monitoring for the cluster and for Vault: the `checkmk-kube-agent`
-  collectors behind an internal load balancer restricted to the VPC, and a Vault
-  AppRole whose policy covers `sys/metrics` and `sys/health` and nothing else,
-  bound to the VPC CIDR. `unauthenticated_metrics_access` stays off, because the
-  Vault listener is internet-facing.
+- Observability in the cluster: `kube-prometheus-stack` (Prometheus,
+  Alertmanager, node-exporter, kube-state-metrics and Grafana), `loki` as the
+  log store and `alloy` as the collector, all reconciled by Argo CD. Grafana is
+  published through its own load balancer.
+- Vault gains a second listener on 8202 that exists only inside the cluster,
+  with `unauthenticated_metrics_access` enabled on it. It stays disabled on
+  8200, which the load balancer publishes to the internet. Prometheus scrapes
+  the pod IPs directly, because the chart declares no container port for 8202.
 - An `import` block adopts the `logging` namespace Argo CD had already created.
   `terraform import` is unavailable with remote execution, and an import block
   whose target is already managed is a no-op, so it is safe to leave in place.
 - The Fluent Bit Application does not create its namespace: the platform layer
   owns it, because the service account in it needs an IRSA annotation carrying
   the AWS account ID. With both creating it, whichever ran second failed.
-- `aws-fluent-bit-cloudwatch` module and its Application: container logs go to
-  CloudWatch, not to Checkmk, which alerts on log patterns but does not store or
-  search them. The log group and its retention are Terraform's, and the IAM
-  policy omits `logs:CreateLogGroup` so no second group can appear without one.
-- `config/checkmk/README.md` documents the site-side configuration, which cannot
-  be managed with Terraform: no Checkmk provider exists.
+- `aws-fluent-bit-cloudwatch` module and its Application: a durable copy of the
+  container logs outside the cluster, alongside the searchable copy in Loki. The
+  log group and its retention are Terraform's, and the IAM policy omits
+  `logs:CreateLogGroup` so no second group can appear without one.
 - Composite action `hcp-workspace-state` and a shared plan-report script for
   the workflows.
 - `.terraform-version` pinning Terraform to 1.15.9, so tenv and friends select
@@ -168,6 +169,13 @@ for the modules once they are tagged.
   major installs against a module that predates it and fails on removed schema.
 
 ### Removed
+
+- Checkmk in full: the `aws-checkmk-server` module, its wiring in the platform
+  layer, the `checkmk-kube-agent` Application, the monitoring AppRole in
+  `config/vault` and `config/checkmk/`. Its site configuration could not be
+  managed declaratively — no Terraform provider exists — and it stores no log
+  history, both of which the Grafana stack settles. The EC2 instance and its
+  elastic IP go with it.
 
 - The `staging` and `production` environments (`infra/environments/staging`,
   `infra/environments/production`) and their HCP Terraform workspaces from the

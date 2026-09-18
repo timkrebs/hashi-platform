@@ -24,23 +24,6 @@ module "cert_manager" {
   source = "../../../modules/cert-manager"
 }
 
-# Checkmk monitoring. It only needs the VPC, but it lives here so it shares the
-# add-ons' lifecycle and is torn down with them.
-module "checkmk" {
-  count  = var.enable_checkmk ? 1 : 0
-  source = "../../../modules/aws-checkmk-server"
-
-  name      = "${local.project}-${local.environment}-checkmk"
-  region    = var.region
-  vpc_id    = local.cluster.vpc_id
-  subnet_id = local.checkmk_subnet_id
-
-  instance_type       = var.checkmk_instance_type
-  allowed_cidr_blocks = var.checkmk_allowed_cidr_blocks
-
-  tags = local.common_tags
-}
-
 module "argocd" {
   count  = var.enable_argocd ? 1 : 0
   source = "../../../modules/argocd"
@@ -139,9 +122,9 @@ resource "kubernetes_storage_class_v1" "gp3" {
   }
 }
 
-# Container logs go to CloudWatch, not to Checkmk: Checkmk alerts on patterns in
-# a file, it does not store or search log history. Metrics and state live in
-# Checkmk, logs live where they can actually be searched.
+# A durable copy of the container logs, outside the cluster. Interactive search
+# runs on Loki inside it, which goes away when the environment does; this is the
+# copy that does not.
 module "fluent_bit" {
   count  = var.enable_log_shipping ? 1 : 0
   source = "../../../modules/aws-fluent-bit-cloudwatch"

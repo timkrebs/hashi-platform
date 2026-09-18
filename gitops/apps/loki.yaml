@@ -1,0 +1,36 @@
+# gitops/apps/loki.yaml
+#
+# Log store behind Grafana. Single-binary mode with filesystem storage: a
+# sandbox does not need the read/write/backend split, and object storage would
+# mean another IAM role for what is throwaway data.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loki
+  namespace: argocd
+  annotations:
+    # Before Alloy, which ships logs into it.
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  project: default
+  sources:
+    - repoURL: https://grafana.github.io/helm-charts
+      chart: loki
+      targetRevision: 7.3.0
+      helm:
+        releaseName: loki
+        valueFiles:
+          - $values/gitops/values/loki/values.yaml
+    - repoURL: https://github.com/timkrebs/hashi-platform.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
