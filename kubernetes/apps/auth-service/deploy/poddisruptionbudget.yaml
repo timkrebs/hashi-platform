@@ -1,0 +1,16 @@
+# Keeps a voluntary disruption -- a node drain, a cluster upgrade -- from taking
+# both replicas at once.
+#
+# With replicas: 2 and minAvailable: 1 a drain evicts one pod and waits. Setting
+# minAvailable equal to replicas would deadlock the drain instead, which is how
+# a node group upgrade ends in PodEvictionFailure.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: auth-service
+  namespace: auth-service
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: auth-service

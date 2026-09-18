@@ -1,0 +1,17 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: auth-service
+  namespace: auth-service
+  labels:
+    app.kubernetes.io/name: auth-service
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: auth-service
+  endpoints:
+    # The admin port, not the public one. "admin" is the Service port NAME; a
+    # mismatch here makes Prometheus scrape nothing and report no error.
+    - port: admin
+      path: /metrics
+      interval: 30s

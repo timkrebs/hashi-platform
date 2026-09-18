@@ -1,0 +1,135 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: auth-service
+  labels:
+    app.kubernetes.io/name: auth-service
+    app.kubernetes.io/component: identity
+spec:
+  # Two, so a node drain or a rollout never takes the service to zero. The
+  # cluster has roughly five free pod slots (17 per t3.medium), so this is
+  # about the ceiling for now. The Vault Agent is a sidecar CONTAINER, not a
+  # second pod, so it costs no extra slot.
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: auth-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: auth-service
+        app.kubernetes.io/component: identity
+      annotations:
+        # ---- Vault Agent injection -------------------------------------
+        # The injecting webhook adds an init container that logs in with this
+        # pod's ServiceAccount token, plus a sidecar that renews the lease and
+        # rewrites the token file. Nothing here holds a long-lived credential.
+        vault.hashicorp.com/agent-inject: "true"
+        # Writes the Vault token to /vault/secrets/token. That is all this
+        # service needs -- it calls Transit itself rather than having a secret
+        # templated in, because the signing key must never leave Vault.
+        vault.hashicorp.com/agent-inject-token: "true"
+        vault.hashicorp.com/role: auth-service
+        vault.hashicorp.com/auth-path: auth/kubernetes
+        # Vault Enterprise namespaces are a header, not a path. Without this
+        # the agent authenticates against the root namespace, where the
+        # kubernetes auth mount does not exist.
+        vault.hashicorp.com/namespace: hp-dev-backend
+        # The agent verifies Vault's certificate against this CA. Without it
+        # the login fails with "certificate signed by unknown authority" --
+        # cert-manager's CA is not in any system trust store.
+        vault.hashicorp.com/tls-secret: vault-ca
+        vault.hashicorp.com/ca-cert: /vault/tls/ca.crt
+        # Keep the sidecar running: pre-populate-only would inject the token
+        # once and exit, and the service would still be holding an expired
+        # token an hour later.
+        vault.hashicorp.com/agent-pre-populate-only: "false"
+        vault.hashicorp.com/agent-limits-mem: 64Mi
+        vault.hashicorp.com/agent-limits-cpu: 100m
+        vault.hashicorp.com/agent-requests-mem: 32Mi
+        vault.hashicorp.com/agent-requests-cpu: 20m
+    spec:
+      serviceAccountName: auth-service
+      # Longer than SHUTDOWN_GRACE (20s) so in-flight requests finish before
+      # SIGKILL. Equal or shorter would make the grace period decorative.
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: auth-service
+      containers:
+        - name: auth-service
+          image: ghcr.io/timkrebs/auth-service:v0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: admin
+              containerPort: 9090
+          env:
+            - name: HTTP_ADDR
+              value: ":8080"
+            - name: VAULT_ADDR
+              value: https://vault.vault.svc:8200
+            - name: VAULT_NAMESPACE
+              value: hp-dev-backend
+            - name: VAULT_TOKEN_PATH
+              value: /vault/secrets/token
+            - name: VAULT_TRANSIT_MOUNT
+              value: transit
+            - name: VAULT_SIGNING_KEY
+              value: auth-service-jwt
+            - name: TOKEN_ISSUER
+              value: https://auth-service.auth-service.svc.cluster.local
+            - name: TOKEN_AUDIENCE
+              value: hashi-platform
+            # Short, because a JWT cannot be revoked once issued. Fifteen
+            # minutes bounds the damage of a leaked token.
+            - name: TOKEN_TTL
+              value: 15m
+            - name: SHUTDOWN_GRACE
+              value: 20s
+            - name: LOG_LEVEL
+              value: info
+          # Probes hit the admin port, which is never published outside the
+          # cluster. Liveness deliberately does not touch Vault.
+          livenessProbe:
+            httpGet: { path: /healthz, port: admin }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /readyz, port: admin }
+            periodSeconds: 5
+            failureThreshold: 3
+          # The Vault Agent has to log in before the first readiness check can
+          # succeed; without this the pod is killed mid-startup.
+          startupProbe:
+            httpGet: { path: /healthz, port: admin }
+            periodSeconds: 3
+            failureThreshold: 20
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }

@@ -1,0 +1,34 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: auth-service
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - deployment.yaml
+  - service.yaml
+  - servicemonitor.yaml
+  - poddisruptionbudget.yaml
+  - networkpolicy.yaml
+
+# Die CA, gegen die der Vault Agent das Serverzertifikat prueft. Kopie von
+# config/vault/vault-ca.pem -- oeffentliches Material, kein privater Schluessel.
+#
+# Wird die Umgebung neu aufgebaut, erzeugt cert-manager eine neue CA und diese
+# Kopie muss aufgefrischt werden, sonst scheitert jeder Vault-Login des Agents
+# an "certificate signed by unknown authority". Gegenprobe:
+#   kubectl -n vault get secret vault-tls -o jsonpath='{.data.ca\.crt}' \
+#     | base64 -d | diff - deploy/vault-ca.pem
+secretGenerator:
+  - name: vault-ca
+    files:
+      - ca.crt=vault-ca.pem
+
+generatorOptions:
+  # Ohne das haengt kustomize einen Hash an den Namen, und die Annotation
+  # vault.hashicorp.com/tls-secret zeigt auf einen Namen, den es nicht gibt.
+  disableNameSuffixHash: true
+
+images:
+  - name: ghcr.io/timkrebs/auth-service
+    newTag: v0.1.0

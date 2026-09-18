@@ -1,0 +1,59 @@
+# ACHTUNG: Diese Policy wird auf dem dev-Cluster derzeit STILL IGNORIERT.
+#
+# Das AWS VPC CNI erzwingt NetworkPolicies nur, wenn der nodeagent mit
+# --enable-network-policy=true laeuft. Auf diesem Cluster steht der Wert auf
+# false, der aws-eks-nodeagent-Container ist zwar da, setzt aber nichts durch.
+# Kubernetes nimmt das Objekt trotzdem klaglos an -- es sieht also so aus, als
+# waere der Datenverkehr eingeschraenkt, und das ist er nicht.
+#
+# Einschalten ueber die vpc-cni-Addon-Konfiguration:
+#   enableNetworkPolicy = "true"
+# Das gehoert in cluster_addons in infra/modules/aws-eks-cluster und braucht
+# einen Neustart des aws-node DaemonSets.
+#
+# Das Manifest bleibt hier, damit die Absicht versioniert ist und beim
+# Einschalten sofort greift.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: auth-service
+  namespace: auth-service
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: auth-service
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Der oeffentliche Port steht jedem Workload im Cluster offen -- das ist
+    # der Zweck eines Auth-Service.
+    - ports:
+        - port: 8080
+          protocol: TCP
+    # Metriken und Health nur fuer Prometheus.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+      ports:
+        - port: 9090
+          protocol: TCP
+  egress:
+    # DNS, sonst laesst sich vault.vault.svc nicht aufloesen.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Vault. Mehr braucht dieser Service nicht -- keine Datenbank, kein
+    # ausgehender Internetverkehr.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: vault
+      ports:
+        - port: 8200
+          protocol: TCP

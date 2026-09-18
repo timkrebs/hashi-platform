@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: auth-service
+  labels:
+    app.kubernetes.io/name: auth-service
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: auth-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    # Metrics and health. Separate from the public port on purpose -- see the
+    # comment in internal/httpapi/server.go.
+    - name: admin
+      port: 9090
+      targetPort: admin
