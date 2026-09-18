@@ -38,8 +38,14 @@ ui:
 server:
   image:
     # Enterprise-Image, sonst laedt keine Lizenz. Tag-Schema ist "<version>-ent".
+    #
+    # Bewusst neuer als die appVersion des Charts (2.0.4): die Lizenz enthaelt
+    # das Modul "agentic-iam", das 2.0.4 nicht kennt und mit
+    # "licensing could not be initialized: invalid module" abbricht. Lizenzen
+    # sind vorwaertsgerichtet - das Binary muss mindestens so neu sein wie die
+    # Lizenz, nicht umgekehrt.
     repository: hashicorp/vault-enterprise
-    tag: "2.0.4-ent"
+    tag: "2.1.1-ent"
 
   # Das Secret wird ausserhalb von Git angelegt, siehe infra/README.md:
   #   kubectl create secret generic vault-ent-license \
