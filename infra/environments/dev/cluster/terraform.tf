@@ -19,12 +19,12 @@ terraform {
     # lock file controls their versions.
     tls = {
       source  = "hashicorp/tls"
-      version = "~> 4.0.5"
+      version = "~> 4.4.1"
     }
 
     cloudinit = {
       source  = "hashicorp/cloudinit"
-      version = "~> 2.3.4"
+      version = "~> 2.4.1"
     }
 
     time = {
