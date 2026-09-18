@@ -92,6 +92,9 @@ for the modules once they are tagged.
   at `0/1` with no outward sign of the cause.
 - Vault TLS is issued by cert-manager from `gitops/manifests/vault-pki`. The
   certificate covers `*.vault-internal` so Raft peers can verify each other.
+- `config/vault/` takes `vault_tls_server_name`, so the provider can verify
+  Vault's certificate against an in-cluster name while connecting through the
+  load balancer, whose generated hostname the certificate does not carry.
 - `config/vault/`: a Terraform root that configures the running Vault cluster.
   An `admin` policy and userpass login in the root namespace so the root token
   can be revoked; the `hp-dev-backend` and `hp-dev-frontend` namespaces, each

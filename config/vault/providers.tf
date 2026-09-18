@@ -12,4 +12,12 @@ provider "vault" {
   # environment and turns the connection into plain trust-on-first-use.
   ca_cert_file    = var.vault_ca_cert_file
   skip_tls_verify = var.vault_skip_tls_verify
+
+  # Vault is reached through its network load balancer, whose AWS-generated
+  # hostname is not in the certificate — cert-manager issued it for the
+  # in-cluster names. This verifies the certificate against one of the names it
+  # actually carries, while still connecting to the load balancer. The chain is
+  # still checked against the CA, so a man in the middle would need a
+  # certificate from that same private CA; only the name check is redirected.
+  tls_server_name = var.vault_tls_server_name
 }

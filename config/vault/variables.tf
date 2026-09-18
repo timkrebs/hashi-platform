@@ -20,6 +20,12 @@ variable "vault_ca_cert_file" {
   default     = null
 }
 
+variable "vault_tls_server_name" {
+  description = "Name the server certificate is verified against, when it differs from the host in vault_address. Set this to an in-cluster name such as vault.vault.svc.cluster.local when reaching Vault through its load balancer, whose generated hostname the certificate does not carry."
+  type        = string
+  default     = null
+}
+
 variable "vault_skip_tls_verify" {
   description = "Skip verification of Vault's TLS certificate. Acceptable only for a throwaway environment: it disables the check that would catch a man-in-the-middle."
   type        = bool

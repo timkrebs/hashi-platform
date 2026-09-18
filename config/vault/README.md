@@ -52,10 +52,38 @@ terraform output -raw admin_login_command   # vault login -method=userpass ...
 vault token revoke -self                    # with the root token still set
 ```
 
-Vault serves a certificate from the in-cluster cert-manager CA, which no public
-trust store knows. Either point `vault_ca_cert_file` at that CA, set
-`VAULT_CACERT` on the runner, or — for a throwaway environment only — set
-`vault_skip_tls_verify`.
+### Reaching Vault over TLS
+
+Two separate things have to line up, and they fail with different errors.
+
+**The CA.** Vault's certificate comes from the in-cluster cert-manager CA, which
+no public trust store knows. Point `vault_ca_cert_file` at that CA or set
+`VAULT_CACERT` on the runner, otherwise the error is
+`x509: certificate signed by unknown authority`.
+
+**The name.** cert-manager issued the certificate for the in-cluster names, and
+`vault_address` points at the load balancer, whose AWS-generated hostname is not
+among them. The error then names both sides:
+
+```
+certificate is valid for vault, vault.vault, vault.vault.svc,
+vault.vault.svc.cluster.local, *.vault-internal, ...
+not k8s-vault-vaultui-....elb.us-east-1.amazonaws.com
+```
+
+Set `vault_tls_server_name` to `vault.vault.svc.cluster.local`. The connection
+still goes to the load balancer and the chain is still verified against the CA —
+only the name check is redirected to a name the certificate carries. A man in
+the middle would still need a certificate from that same private CA.
+
+Adding the load balancer hostname to the `Certificate` in
+`gitops/manifests/vault-pki` would be the more literal fix, and is worth doing
+once the address is stable. It is AWS-generated and changes whenever the load
+balancer is recreated, so it would have to be updated by hand each time.
+
+`vault_skip_tls_verify` exists as a last resort. Prefer not to use it here: this
+connection carries the Vault token across the public internet, and skipping
+verification is exactly what lets someone else collect it.
 
 ## Certificate authorities
 
