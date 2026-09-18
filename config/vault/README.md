@@ -125,3 +125,36 @@ make check          # covers this root through CONFIG_DIRS
 `terraform validate` needs `terraform init -backend=false`, because the `cloud`
 block points at the `hashi-platform-vault` workspace, which has to exist before
 a real plan can run.
+
+## Workload identity (Kubernetes auth)
+
+`kubernetes-auth.tf` adds what in-cluster services need. Everything else in
+this root authenticates humans with userpass; this authenticates pods.
+
+A pod presents its ServiceAccount token, Vault verifies it through the
+cluster's TokenReview API and returns a Vault token carrying a policy. That
+call only works because the Vault server's own ServiceAccount is bound to
+`system:auth-delegator` — the Helm chart's `server.authDelegator`, already in
+place. Without it every login fails with `permission denied` and nothing on the
+client side explains why.
+
+No reviewer JWT and no CA certificate are pinned here on purpose: Vault runs
+inside the cluster and uses its own pod's token and CA bundle. Pinning them
+would put a credential in Terraform state and break on the next rotation.
+
+### Transit signing key
+
+The `transit` mount holds `auth-service-jwt`, an RSA-2048 key with
+`exportable = false`. Nothing can read the private key out of Vault, including
+the service that uses it — it sends bytes to be signed and receives a
+signature. Rotation is a Vault operation, not a Terraform one:
+
+```bash
+vault write -f -namespace=hp-dev-backend transit/keys/auth-service-jwt/rotate
+```
+
+Earlier versions stay published, so tokens signed before a rotation keep
+verifying until they expire.
+
+The consumer is `kubernetes/apps/auth-service/`; its README describes the full
+chain from ServiceAccount token to signed JWT.

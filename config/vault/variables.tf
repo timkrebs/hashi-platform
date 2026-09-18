@@ -130,3 +130,14 @@ variable "dev_cert_max_ttl" {
   type        = string
   default     = "720h"
 }
+
+variable "kubernetes_host" {
+  description = "API server address Vault uses for TokenReview. From inside the cluster this is the in-cluster service, not the EKS endpoint."
+  type        = string
+  default     = "https://kubernetes.default.svc:443"
+
+  validation {
+    condition     = can(regex("^https://", var.kubernetes_host))
+    error_message = "kubernetes_host must be an https URL."
+  }
+}
