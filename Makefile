@@ -5,7 +5,9 @@ SHELL := /bin/bash
 TFLINT_CONFIG := $(CURDIR)/.tflint.hcl
 MODULE_DIRS   := $(wildcard infra/modules/*)
 ENV_DIRS      := $(patsubst %/,%,$(dir $(wildcard infra/environments/*/*/main.tf)))
-TF_DIRS       := $(MODULE_DIRS) $(ENV_DIRS)
+# Roots that configure something already running, rather than creating it.
+CONFIG_DIRS   := $(patsubst %/,%,$(dir $(wildcard config/*/main.tf)))
+TF_DIRS       := $(MODULE_DIRS) $(ENV_DIRS) $(CONFIG_DIRS)
 ENV           ?= dev
 LAYER         ?= cluster
 

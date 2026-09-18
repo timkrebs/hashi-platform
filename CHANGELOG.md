@@ -92,6 +92,14 @@ for the modules once they are tagged.
   at `0/1` with no outward sign of the cause.
 - Vault TLS is issued by cert-manager from `gitops/manifests/vault-pki`. The
   certificate covers `*.vault-internal` so Raft peers can verify each other.
+- `config/vault/`: a Terraform root that configures the running Vault cluster.
+  An `admin` policy and userpass login in the root namespace so the root token
+  can be revoked; the `hp-dev-backend` and `hp-dev-frontend` namespaces, each
+  with its own userpass auth, policy and kv-v2 engine; a root CA that signs both
+  an intermediate in the root namespace and a `pki-dev` engine inside the
+  backend namespace, so developers issue their own certificates without ever
+  seeing the root key. Passwords are inputs; only the two demo API keys are
+  generated. `make check` covers the new root through `CONFIG_DIRS`.
 - Composite action `hcp-workspace-state` and a shared plan-report script for
   the workflows.
 - `.terraform-version` pinning Terraform to 1.15.9, so tenv and friends select

@@ -383,6 +383,19 @@ Rules that keep destroys clean:
   (`kms_key_deletion_window_in_days` on the cluster module) so rebuilt
   clusters do not accumulate keys pending deletion.
 
+## Configuring Vault
+
+`config/vault/` is a Terraform root that configures the running Vault cluster
+rather than creating it: the administrator, the two team namespaces, the
+certificate authorities and the demo secrets. It has its own HCP Terraform
+workspace (`hashi-platform-vault`) because its lifecycle is independent of the
+cluster — Vault can be reconfigured without touching EKS, and rebuilding the
+cluster does not replay this configuration.
+
+See [config/vault/README.md](../config/vault/README.md) for the namespace
+layout, how the cross-namespace PKI signing works, and why the passwords are
+inputs rather than generated.
+
 ## Policies
 
 HCP Terraform evaluates the Sentinel policy set in [`policies/`](policies/)
