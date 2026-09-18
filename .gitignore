@@ -42,4 +42,5 @@ Thumbs.db
 !.vscode/extensions.json
 
 # Miscellaneous
-Kubernetes/config/*
+kubernetes/apps/rabbitmq/config/*
+kubernetes/config/*

@@ -1,0 +1,38 @@
+# gitops/apps/grafana-dashboards.yaml
+#
+# Eigene Grafana-Dashboards als ConfigMaps. Der Sidecar grafana-sc-dashboard
+# aus dem kube-prometheus-stack-Chart sammelt alle ConfigMaps mit dem Label
+# grafana_dashboard=1 ueber saemtliche Namespaces ein. Es braucht also weder
+# einen Grafana-Neustart noch einen Eingriff an den Chart-Values.
+#
+# Die Dashboards landen im Ordner "General". Die Annotation grafana_folder an
+# den ConfigMaps ist vorbereitet, wirkt aber erst, wenn in den Chart-Values
+# grafana.sidecar.dashboards.folderAnnotation gesetzt ist -- ohne das ignoriert
+# der Sidecar sie stillschweigend.
+#
+# Sync-Wave 15: nach dem kube-prometheus-stack (10), damit Grafana und der
+# Sidecar schon laufen. Ohne laufenden Sidecar bleiben die ConfigMaps zwar
+# liegen und werden spaeter eingelesen, aber die Reihenfolge macht den ersten
+# Rollout nachvollziehbar.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: grafana-dashboards
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "15"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/timkrebs/hashi-platform.git
+    targetRevision: main
+    path: gitops/manifests/grafana-dashboards
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      # prune: true ist hier richtig -- ein geloeschtes Dashboard soll auch
+      # aus Grafana verschwinden.
+      prune: true
+      selfHeal: true

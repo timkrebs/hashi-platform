@@ -1,0 +1,39 @@
+# Veroeffentlicht ausschliesslich die Management-UI (15672) ueber einen
+# internet-facing NLB. Bewusst ein eigener Service statt spec.service.type:
+# LoadBalancer am RabbitmqCluster: dessen Service buendelt AMQP 5672 und die
+# Prometheus-Metriken 15692 mit der UI, und die haben im Internet nichts zu
+# suchen.
+#
+# WARNUNG: die Management-UI spricht hier reines HTTP. Das Login-Formular
+# schickt Benutzer und Passwort also unverschluesselt ueber das offene Netz --
+# anders als Vault und Argo CD, die ihr TLS selbst terminieren. Solange das
+# eine Sandbox ist, ist das eine bewusste Abkuerzung; sobald es das nicht mehr
+# ist, gehoert entweder TLS an den Management-Listener (spec.tls am
+# RabbitmqCluster, Zertifikat von dem cert-manager-Issuer, der schon im
+# Cluster liegt) oder loadBalancerSourceRanges auf einen bekannten Bereich.
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-dev-management
+  namespace: rabbitmq
+  labels:
+    app.kubernetes.io/name: rabbitmq-dev
+    app.kubernetes.io/component: management-ui
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: external
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+spec:
+  type: LoadBalancer
+  # Auf einen Office- oder VPN-Bereich einschraenken, sobald das mehr als eine
+  # Demo ist. Die UI ist Vollzugriff: wer sich anmeldet, legt Benutzer an.
+  loadBalancerSourceRanges:
+    - 0.0.0.0/0
+  # Exakt der Selector, den der Operator an seinen eigenen Service schreibt.
+  selector:
+    app.kubernetes.io/name: rabbitmq-dev
+  ports:
+    - name: management
+      port: 15672
+      targetPort: 15672
+      protocol: TCP

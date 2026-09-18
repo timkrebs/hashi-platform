@@ -120,6 +120,18 @@ for the modules once they are tagged.
   Alertmanager, node-exporter, kube-state-metrics and Grafana), `loki` as the
   log store and `alloy` as the collector, all reconciled by Argo CD. Grafana is
   published through its own load balancer.
+- Two Grafana dashboards, reconciled by Argo CD as ConfigMaps that the chart's
+  dashboard sidecar picks up: `SRE Overview` (cluster, Vault, workloads,
+  resources on one page) and `Vault Enterprise` (seal state, Raft, leases,
+  audit, leadership). They land in the `General` folder; the `grafana_folder`
+  annotation on the ConfigMaps only takes effect once
+  `grafana.sidecar.dashboards.folderAnnotation` is set in the chart values.
+  Every query was run against Prometheus before committing, so no panel is
+  wired to a metric this cluster does not emit.
+- `SRE Overview` leads with used pod slots against allocatable, because the
+  pod ceiling — not CPU or memory — is what this cluster runs out of first:
+  `t3.medium` allows 17 pods per node, and three full nodes leave Loki and the
+  third Vault replica unschedulable.
 - Vault gains a second listener on 8202 that exists only inside the cluster,
   with `unauthenticated_metrics_access` enabled on it. It stays disabled on
   8200, which the load balancer publishes to the internet. Prometheus scrapes
