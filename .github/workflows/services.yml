@@ -230,7 +230,7 @@ jobs:
           size=$(du -h "/tmp/${{ matrix.service }}.tar" | cut -f1)
           echo "- \`${{ matrix.service }}\` image archive: ${size}" >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: image-${{ matrix.service }}
           path: /tmp/${{ matrix.service }}.tar
