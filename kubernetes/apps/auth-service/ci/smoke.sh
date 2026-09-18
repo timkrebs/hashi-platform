@@ -2,9 +2,10 @@
 # Smoke test for the built container image.
 #
 # Runs the image exactly as shipped -- distroless, non-root, read-only root
-# filesystem -- with no Vault anywhere. That is the point: it proves the binary
+# filesystem -- with no synced secret. That is the point: it proves the binary
 # actually starts in that image, and that the liveness/readiness split behaves
-# correctly when the dependency is missing.
+# correctly while the Vault Secrets Operator has not written the Secret yet,
+# which is exactly the state every pod passes through on startup.
 #
 # Usage: ci/smoke.sh <image>
 set -euo pipefail
@@ -27,12 +28,12 @@ docker run -d --name "${NAME}" \
   --user 65532:65532 \
   --cap-drop ALL \
   -p 18080:8080 -p 19090:9090 \
-  -e VAULT_ADDR=https://127.0.0.1:1 \
-  -e VAULT_TOKEN_PATH=/nonexistent/token \
+  -e SECRETS_DIR=/nonexistent \
+  -e SECRETS_RETRY=2s \
   "${IMAGE}" >/dev/null
 
-# 1. Liveness must come up WITHOUT Vault. If it did not, the startup probe
-#    would kill the pod during the Vault Agent's login window.
+# 1. Liveness must come up WITHOUT the secret. If it did not, the startup
+#    probe would kill the pod during the operator's sync window.
 echo "waiting for /healthz"
 for i in $(seq 1 30); do
   code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:19090/healthz || true)
@@ -42,29 +43,30 @@ for i in $(seq 1 30); do
 done
 echo "  /healthz 200"
 
-# 2. Readiness must be false: there is no Vault. A service that reports ready
-#    here would take traffic it cannot serve.
+# 2. Readiness must be false: there is no secret. A service that reports
+#    ready here would take traffic it cannot serve.
 code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:19090/readyz || true)
-[ "${code}" = "503" ] || fail "/readyz returned ${code}, want 503 without Vault"
+[ "${code}" = "503" ] || fail "/readyz returned ${code}, want 503 without the synced secret"
 echo "  /readyz 503 as expected"
 
 # 3. Metrics that exist before any request. A counter whose labels are known
 #    in advance must already be published, or a dashboard on a fresh pod shows
 #    "No data" instead of zero.
 body=$(curl -s --max-time 5 http://localhost:19090/metrics || true)
-grep -q '^auth_vault_up 0$' <<<"${body}" \
-  || fail "/metrics does not report auth_vault_up=0 while Vault is unreachable"
+grep -q '^auth_secret_loaded 0$' <<<"${body}" \
+  || fail "/metrics does not report auth_secret_loaded=0 before the sync"
 grep -q '^auth_tokens_issued_total{result="denied"} 0$' <<<"${body}" \
   || fail "/metrics does not pre-initialise auth_tokens_issued_total"
 echo "  /metrics pre-initialises its known series"
 
-# 4. The public endpoint must degrade, not crash. Without Vault a token request
+# 4. The public endpoint must degrade, not crash. Without the secret a token
+#    request
 #    is 503 -- never a 500 and never a panic that takes the process down.
 code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
   -X POST http://localhost:18080/v1/token \
   -H 'Content-Type: application/json' \
   -d '{"username":"dev1","password":"x"}' || true)
-[ "${code}" = "503" ] || fail "POST /v1/token returned ${code}, want 503 without Vault"
+[ "${code}" = "503" ] || fail "POST /v1/token returned ${code}, want 503 without the synced secret"
 echo "  POST /v1/token 503 as expected"
 
 # 5. A malformed body must be rejected before anything else happens.

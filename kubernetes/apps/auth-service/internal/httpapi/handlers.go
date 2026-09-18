@@ -55,7 +55,7 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, expiresAt, err := s.auth.Issue(r.Context(), req.Username, req.Password, req.Scopes)
+	token, expiresAt, err := s.auth.Issue(req.Username, req.Password, req.Scopes)
 	switch {
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		// The same answer for an unknown user and a wrong password. Telling
@@ -63,7 +63,8 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid_grant", "invalid username or password")
 		return
 	case err != nil:
-		// Vault is the likely cause. Log the detail, return none of it.
+		// Almost always the synced secret not being there yet. Log the detail,
+		// return none of it.
 		s.log.Error("token issue failed",
 			slog.String("error", err.Error()),
 			slog.String("request_id", RequestID(r.Context())))
@@ -84,8 +85,8 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 // tokens locally against these keys and never calls the auth service on the
 // request path. An auth service that has to be asked about every token is a
 // single point of failure for the whole cluster.
-func (s *Server) handleJWKS(w http.ResponseWriter, r *http.Request) {
-	keys, err := s.auth.JWKS(r.Context())
+func (s *Server) handleJWKS(w http.ResponseWriter, _ *http.Request) {
+	keys, err := s.auth.JWKS()
 	if err != nil {
 		s.log.Error("jwks unavailable", slog.String("error", err.Error()))
 		writeError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "keys unavailable")
@@ -112,7 +113,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 // unavailable should do the first, never the second.
 func (s *Server) handleReadyz(w http.ResponseWriter, _ *http.Request) {
 	if !s.ready.Ready() {
-		writeError(w, http.StatusServiceUnavailable, "not_ready", "vault unavailable")
+		writeError(w, http.StatusServiceUnavailable, "not_ready", "synced secret not available")
 		return
 	}
 	w.WriteHeader(http.StatusOK)

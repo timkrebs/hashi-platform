@@ -13,20 +13,15 @@ import (
 // values that cannot be guessed safely -- the service refuses to start rather
 // than run with a plausible-looking wrong one.
 type Config struct {
-	HTTPAddr       string
-	AdminAddr      string
-	VaultAddr      string
-	VaultNamespace string
-	VaultTokenPath string
-	TransitMount   string
-	SigningKey     string
-	UserpassMount  string
-	Issuer         string
-	Audience       string
-	TokenTTL       time.Duration
-	ShutdownGrace  time.Duration
-	TokenRefresh   time.Duration
-	LogLevel       string
+	HTTPAddr      string
+	AdminAddr     string
+	SecretsDir    string
+	Issuer        string
+	Audience      string
+	TokenTTL      time.Duration
+	ShutdownGrace time.Duration
+	SecretsRetry  time.Duration
+	LogLevel      string
 }
 
 // Load reads the environment and validates it.
@@ -35,17 +30,13 @@ func Load() (Config, error) {
 		HTTPAddr: env("HTTP_ADDR", ":8080"),
 		// Metrics and health. Separate listener, never published outside
 		// the cluster -- see internal/httpapi/server.go.
-		AdminAddr:      env("ADMIN_ADDR", ":9090"),
-		VaultAddr:      env("VAULT_ADDR", "https://vault.vault.svc:8200"),
-		VaultNamespace: env("VAULT_NAMESPACE", "hp-dev-backend"),
-		// Written by the Vault Agent sidecar, not by us. See deploy/deployment.yaml.
-		VaultTokenPath: env("VAULT_TOKEN_PATH", "/vault/secrets/token"),
-		TransitMount:   env("VAULT_TRANSIT_MOUNT", "transit"),
-		SigningKey:     env("VAULT_SIGNING_KEY", "auth-service-jwt"),
-		UserpassMount:  env("VAULT_USERPASS_MOUNT", "userpass"),
-		Issuer:         env("TOKEN_ISSUER", "https://auth-service.auth-service.svc.cluster.local"),
-		Audience:       env("TOKEN_AUDIENCE", "hashi-platform"),
-		LogLevel:       env("LOG_LEVEL", "info"),
+		AdminAddr: env("ADMIN_ADDR", ":9090"),
+		// Where the Kubernetes Secret is mounted. Its contents come from Vault
+		// via the Vault Secrets Operator; this service never calls Vault.
+		SecretsDir: env("SECRETS_DIR", "/etc/auth-service/secrets"),
+		Issuer:     env("TOKEN_ISSUER", "https://auth-service.auth-service.svc.cluster.local"),
+		Audience:   env("TOKEN_AUDIENCE", "hashi-platform"),
+		LogLevel:   env("LOG_LEVEL", "info"),
 	}
 
 	var err error
@@ -57,10 +48,10 @@ func Load() (Config, error) {
 	if c.ShutdownGrace, err = envDuration("SHUTDOWN_GRACE", 20*time.Second); err != nil {
 		return c, err
 	}
-	// How often the Vault token file is re-read. The agent rewrites it on
-	// renewal; without re-reading, the service keeps using a token that has
-	// already expired and every sign call starts failing with 403.
-	if c.TokenRefresh, err = envDuration("VAULT_TOKEN_REFRESH", 30*time.Second); err != nil {
+	// How often the mounted directory is retried while it is not there yet.
+	// The operator needs a moment to authenticate and fetch after the pod
+	// starts, and the kubelet then needs one more to project the update.
+	if c.SecretsRetry, err = envDuration("SECRETS_RETRY", 5*time.Second); err != nil {
 		return c, err
 	}
 

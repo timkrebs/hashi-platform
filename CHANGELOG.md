@@ -116,6 +116,27 @@ for the modules once they are tagged.
 - The pipeline plans and applies `config/vault` after the platform layer, and
   posts a speculative Vault plan on pull requests. The stage carries no
   `-var-file`, and is skipped until the `hashi-platform-vault` workspace exists.
+- The auth service reads its secrets from a Kubernetes Secret that the Vault
+  Secrets Operator syncs, instead of calling Vault itself. The operator logs in
+  with the namespace's own ServiceAccount, reads one read-only KV path, and
+  writes the result; the pod mounts it as files. Vault leaves the request path
+  entirely, so a Vault outage no longer stops logins — at the price of the
+  signing key existing outside Vault, which Transit signing had avoided. EKS
+  envelope-encrypts Secrets with KMS, and `rolloutRestartTargets` restarts the
+  Deployment on rotation.
+- `vault-secrets-operator` (chart 1.5.1), installed with
+  `defaultVaultConnection` and `defaultAuthMethod` disabled: a cluster-wide
+  Vault identity would reach everything any policy allows. Each namespace
+  brings its own `VaultConnection`, `VaultAuth` and `VaultStaticSecret`.
+- Passwords are bcrypt hashes synced from Vault, and the service refuses to
+  start if any entry is not one — a plaintext password is then found by the
+  pipeline rather than by a user.
+- The JWT `kid` is the RFC 7638 thumbprint of the public key, so it changes
+  exactly when the key does and a rotation cannot reuse it.
+- The Vault Agent Injector is no longer used by this service. It was silently
+  failing every admission call on this cluster: `fail_open_count` showed 150 of
+  150 calls failing, and `failurePolicy: Ignore` admitted every pod without a
+  sidecar and without an event.
 - `services.yml`: the build pipeline for the Go services —
   discover, fmt, vet, test, build, container-test, scan, push, bump. Services
   are discovered rather than listed: any directory under `kubernetes/apps/`

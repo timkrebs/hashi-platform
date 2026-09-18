@@ -1,73 +1,62 @@
 package auth
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/big"
-	"strconv"
-	"sync"
 	"time"
 
 	"github.com/timkrebs/auth-service/internal/observability"
+	"github.com/timkrebs/auth-service/internal/secrets"
 )
 
-// Verifier checks credentials. Vault's userpass implements it.
-type Verifier interface {
-	VerifyUserpass(ctx context.Context, mount, username, password string) error
+// KeySource supplies the signing key and its id, or an error while the
+// operator has not written the Secret yet.
+type KeySource interface {
+	Signing() (*rsa.PrivateKey, string, error)
 }
 
-// KeyReader exposes the public halves of the signing key.
-type KeyReader interface {
-	PublicKeys(ctx context.Context, mount, key string) (map[int]*rsa.PublicKey, int, error)
+// Verifier checks a username and password.
+type Verifier interface {
+	Verify(username, password string) error
 }
 
 type Options struct {
-	TransitMount  string
-	SigningKey    string
-	UserpassMount string
-	Issuer        string
-	Audience      string
-	TokenTTL      time.Duration
+	Issuer   string
+	Audience string
+	TokenTTL time.Duration
 }
 
-// Service issues tokens and publishes the keys needed to verify them.
+// Service issues tokens and publishes the key needed to verify them.
+//
+// Nothing in here talks to Vault. The key and the user list were put on disk by
+// the Vault Secrets Operator before this process started, so a Vault outage
+// does not stop logins.
 type Service struct {
-	signer   Signer
+	keys     KeySource
 	verifier Verifier
-	keys     KeyReader
 	opts     Options
-
-	mu            sync.RWMutex
-	cachedJWKS    []JWK
-	cachedAt      time.Time
-	latestVersion int
 }
 
-func NewService(signer Signer, verifier Verifier, keys KeyReader, opts Options) *Service {
-	return &Service{signer: signer, verifier: verifier, keys: keys, opts: opts}
+func NewService(keys KeySource, verifier Verifier, opts Options) *Service {
+	return &Service{keys: keys, verifier: verifier, opts: opts}
 }
 
-// ErrInvalidCredentials is returned for a wrong username or password. It is
-// deliberately indistinguishable between the two cases: telling them apart
-// turns the endpoint into a username oracle.
-var ErrInvalidCredentials = fmt.Errorf("invalid credentials")
+// ErrInvalidCredentials is returned for a wrong username or password. The two
+// are deliberately indistinguishable: separating them turns the endpoint into
+// a username oracle.
+var ErrInvalidCredentials = errors.New("invalid credentials")
 
 // Issue verifies credentials and returns a signed token.
-func (s *Service) Issue(ctx context.Context, username, password string, scopes []string) (string, time.Time, error) {
-	if err := s.verifier.VerifyUserpass(ctx, s.opts.UserpassMount, username, password); err != nil {
-		// Only a 4xx means the credentials were actually rejected. A refused
-		// connection or a 5xx means Vault could not answer -- reporting that as
-		// "invalid username or password" sends every user and every operator
-		// looking for a credentials problem during a Vault outage.
-		if isRejection(err) {
+func (s *Service) Issue(username, password string, scopes []string) (string, time.Time, error) {
+	if err := s.verifier.Verify(username, password); err != nil {
+		if errors.Is(err, secrets.ErrInvalidCredentials) || errors.Is(err, ErrInvalidCredentials) {
 			observability.TokensIssued.WithLabelValues("denied").Inc()
 			return "", time.Time{}, ErrInvalidCredentials
 		}
+		// Anything else is this service failing, not the caller being wrong.
 		observability.TokensIssued.WithLabelValues("error").Inc()
 		return "", time.Time{}, fmt.Errorf("verify credentials: %w", err)
 	}
@@ -81,46 +70,20 @@ func (s *Service) Issue(ctx context.Context, username, password string, scopes [
 	now := time.Now().UTC()
 	claims := newClaims(s.opts.Issuer, s.opts.Audience, username, jti, s.opts.TokenTTL, now, scopes)
 
-	s.mu.RLock()
-	version := s.latestVersion
-	s.mu.RUnlock()
-
-	token, signedWith, err := encode(ctx, s.signer, s.opts.TransitMount, s.opts.SigningKey, version, claims)
+	key, keyID, err := s.keys.Signing()
 	if err != nil {
 		observability.TokensIssued.WithLabelValues("error").Inc()
 		return "", time.Time{}, err
 	}
 
-	if signedWith != version {
-		// The key rotated since the cache was filled. Rebuild with the version
-		// that actually signed, and drop the cache so JWKS picks up the new one.
-		s.mu.Lock()
-		s.latestVersion, s.cachedJWKS = signedWith, nil
-		s.mu.Unlock()
-
-		token, _, err = encode(ctx, s.signer, s.opts.TransitMount, s.opts.SigningKey, signedWith, claims)
-		if err != nil {
-			observability.TokensIssued.WithLabelValues("error").Inc()
-			return "", time.Time{}, err
-		}
+	token, err := encode(key, keyID, claims)
+	if err != nil {
+		observability.TokensIssued.WithLabelValues("error").Inc()
+		return "", time.Time{}, err
 	}
 
 	observability.TokensIssued.WithLabelValues("ok").Inc()
 	return token, time.Unix(claims.ExpiresAt, 0).UTC(), nil
-}
-
-// isRejection reports whether the error carries a 4xx status, which is how the
-// verifier says "these credentials are wrong" as opposed to "I am broken".
-//
-// Checked through an interface rather than a concrete type so this package
-// stays independent of the Vault client.
-func isRejection(err error) bool {
-	var se interface{ StatusCode() int }
-	if !errors.As(err, &se) {
-		return false
-	}
-	code := se.StatusCode()
-	return code >= 400 && code < 500
 }
 
 // JWK is one entry of the JWKS document.
@@ -133,61 +96,31 @@ type JWK struct {
 	E   string `json:"e"`
 }
 
-// JWKS returns the public keys, cached for a minute.
+// JWKS returns the public key.
 //
-// Publishing every version, not only the current one, is what makes key
-// rotation non-disruptive: tokens signed before the rotation stay verifiable
-// until they expire.
-func (s *Service) JWKS(ctx context.Context) ([]JWK, error) {
-	s.mu.RLock()
-	if time.Since(s.cachedAt) < time.Minute && s.cachedJWKS != nil {
-		defer s.mu.RUnlock()
-		return s.cachedJWKS, nil
-	}
-	s.mu.RUnlock()
-
-	return s.refreshKeys(ctx)
-}
-
-// refreshKeys always goes to Vault, bypassing the cache.
-func (s *Service) refreshKeys(ctx context.Context) ([]JWK, error) {
-	keys, latest, err := s.keys.PublicKeys(ctx, s.opts.TransitMount, s.opts.SigningKey)
+// This is what keeps the architecture from having a single point of failure:
+// every other service verifies tokens locally against this document and never
+// calls the auth service on the request path.
+//
+// One key, because the pod holds one. A rotation replaces the Secret and the
+// operator restarts this Deployment, so the new pod publishes the new key under
+// a new kid. Tokens signed by the old key stop verifying at that moment, which
+// is why the TTL is short -- if that matters, publish the previous key here too
+// for one TTL's worth of overlap.
+func (s *Service) JWKS() ([]JWK, error) {
+	key, keyID, err := s.keys.Signing()
 	if err != nil {
 		return nil, err
 	}
-
-	out := make([]JWK, 0, len(keys))
-	for version, pub := range keys {
-		out = append(out, JWK{
-			Kty: "RSA",
-			Use: "sig",
-			Alg: "RS256",
-			Kid: strconv.Itoa(version),
-			N:   base64.RawURLEncoding.EncodeToString(pub.N.Bytes()),
-			E:   encodeExponent(pub.E),
-		})
-	}
-
-	s.mu.Lock()
-	s.cachedJWKS, s.cachedAt, s.latestVersion = out, time.Now(), latest
-	s.mu.Unlock()
-	return out, nil
-}
-
-// Warm fetches the keys from Vault, bypassing the cache.
-//
-// It is both the startup check and the periodic readiness probe, so it must not
-// read the cache: a cached answer would report Vault as healthy long after it
-// stopped responding, and the pod would keep taking traffic it cannot serve.
-func (s *Service) Warm(ctx context.Context) error {
-	_, err := s.refreshKeys(ctx)
-	return err
-}
-
-func encodeExponent(e int) string {
-	// JWKS wants the exponent as a minimal big-endian byte string, base64url
-	// encoded -- for the usual 65537 that is "AQAB".
-	return base64.RawURLEncoding.EncodeToString(new(big.Int).SetInt64(int64(e)).Bytes())
+	pub := &key.PublicKey
+	return []JWK{{
+		Kty: "RSA",
+		Use: "sig",
+		Alg: "RS256",
+		Kid: keyID,
+		N:   secrets.Base64URL(pub.N.Bytes()),
+		E:   secrets.Base64URL(secrets.ExponentBytes(pub.E)),
+	}}, nil
 }
 
 func newJTI() (string, error) {

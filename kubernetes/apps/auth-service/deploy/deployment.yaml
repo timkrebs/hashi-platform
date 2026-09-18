@@ -26,35 +26,6 @@ spec:
       labels:
         app.kubernetes.io/name: auth-service
         app.kubernetes.io/component: identity
-      annotations:
-        # ---- Vault Agent injection -------------------------------------
-        # The injecting webhook adds an init container that logs in with this
-        # pod's ServiceAccount token, plus a sidecar that renews the lease and
-        # rewrites the token file. Nothing here holds a long-lived credential.
-        vault.hashicorp.com/agent-inject: "true"
-        # Writes the Vault token to /vault/secrets/token. That is all this
-        # service needs -- it calls Transit itself rather than having a secret
-        # templated in, because the signing key must never leave Vault.
-        vault.hashicorp.com/agent-inject-token: "true"
-        vault.hashicorp.com/role: auth-service
-        vault.hashicorp.com/auth-path: auth/kubernetes
-        # Vault Enterprise namespaces are a header, not a path. Without this
-        # the agent authenticates against the root namespace, where the
-        # kubernetes auth mount does not exist.
-        vault.hashicorp.com/namespace: hp-dev-backend
-        # The agent verifies Vault's certificate against this CA. Without it
-        # the login fails with "certificate signed by unknown authority" --
-        # cert-manager's CA is not in any system trust store.
-        vault.hashicorp.com/tls-secret: vault-ca
-        vault.hashicorp.com/ca-cert: /vault/tls/ca.crt
-        # Keep the sidecar running: pre-populate-only would inject the token
-        # once and exit, and the service would still be holding an expired
-        # token an hour later.
-        vault.hashicorp.com/agent-pre-populate-only: "false"
-        vault.hashicorp.com/agent-limits-mem: 64Mi
-        vault.hashicorp.com/agent-limits-cpu: 100m
-        vault.hashicorp.com/agent-requests-mem: 32Mi
-        vault.hashicorp.com/agent-requests-cpu: 20m
     spec:
       serviceAccountName: auth-service
       # Longer than SHUTDOWN_GRACE (20s) so in-flight requests finish before
@@ -88,16 +59,10 @@ spec:
           env:
             - name: HTTP_ADDR
               value: ":8080"
-            - name: VAULT_ADDR
-              value: https://vault.vault.svc:8200
-            - name: VAULT_NAMESPACE
-              value: hp-dev-backend
-            - name: VAULT_TOKEN_PATH
-              value: /vault/secrets/token
-            - name: VAULT_TRANSIT_MOUNT
-              value: transit
-            - name: VAULT_SIGNING_KEY
-              value: auth-service-jwt
+            # Das Verzeichnis, in das der VaultStaticSecret gemountet wird.
+            # Alles Weitere kommt aus den Dateien darin.
+            - name: SECRETS_DIR
+              value: /etc/auth-service/secrets
             - name: TOKEN_ISSUER
               value: https://auth-service.auth-service.svc.cluster.local
             - name: TOKEN_AUDIENCE
@@ -110,6 +75,10 @@ spec:
               value: 20s
             - name: LOG_LEVEL
               value: info
+          volumeMounts:
+            - name: secrets
+              mountPath: /etc/auth-service/secrets
+              readOnly: true
           # Probes hit the admin port, which is never published outside the
           # cluster. Liveness deliberately does not touch Vault.
           livenessProbe:
@@ -133,3 +102,15 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: secrets
+          secret:
+            # Wird vom Vault Secrets Operator angelegt, nicht von uns.
+            # optional: true ist wichtig -- ohne das bleibt der Pod in
+            # ContainerCreating haengen, bis der Operator synchronisiert hat,
+            # und der wahre Grund steht nur in den Events. So startet der Pod,
+            # meldet sich ueber /readyz als nicht bereit und sagt im Log, worauf
+            # er wartet.
+            secretName: auth-service-secrets
+            optional: true
+            defaultMode: 0400

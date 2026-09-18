@@ -1,0 +1,48 @@
+# Vault Secrets Operator.
+#
+# Bewusst OHNE defaultVaultConnection und defaultAuthMethod: beide wuerden eine
+# clusterweite Vault-Identitaet definieren, und genau das soll hier nicht
+# passieren. Jeder Namespace bringt seine eigene VaultConnection, seine eigene
+# VaultAuth und damit seinen eigenen ServiceAccount mit -- siehe
+# kubernetes/apps/auth-service/deploy/vault.yaml.
+#
+# Die Folge ist, dass ein kompromittierter Namespace nur an die Secrets kommt,
+# die seine Vault-Policy erlaubt. Mit einer Default-Verbindung haette der
+# Operator eine Identitaet fuer alle.
+defaultVaultConnection:
+  enabled: false
+
+defaultAuthMethod:
+  enabled: false
+
+controller:
+  replicas: 1
+
+  manager:
+    # Der dev-Cluster faehrt drei t3.medium mit 17 Pod-Slots pro Node und ist
+    # gut gefuellt; der Operator bekommt bewusst wenig.
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        memory: 192Mi
+
+    # Der Operator selbst exportiert Metriken. Ohne ServiceMonitor waere er die
+    # einzige Komponente im Secret-Pfad, die niemand sieht.
+    clientCache:
+      persistenceModel: none
+
+  # Metriken an Prometheus. serviceMonitorSelectorNilUsesHelmValues steht in
+  # den kube-prometheus-stack-Values auf false, ein Label braucht es also nicht.
+  kubeRbacProxy:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 64Mi
+
+telemetry:
+  serviceMonitor:
+    enabled: true

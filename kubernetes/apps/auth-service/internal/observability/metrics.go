@@ -27,21 +27,15 @@ var (
 		Help: "Tokens issued, by outcome.",
 	}, []string{"result"})
 
-	VaultRequests = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "auth_vault_requests_total",
-		Help: "Calls to Vault, by operation and outcome.",
-	}, []string{"operation", "result"})
-
-	VaultDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name:    "auth_vault_request_duration_seconds",
-		Help:    "Vault call duration. Signing is on the critical path of every login.",
-		Buckets: prometheus.DefBuckets,
-	}, []string{"operation"})
+	SecretLoads = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "auth_secret_loads_total",
+		Help: "Attempts to read the synced secret, by outcome. A rising error count with a loaded secret means rotation is failing silently.",
+	}, []string{"result"})
 
 	// The same signal /readyz reports, as a number you can alert on.
-	VaultUp = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "auth_vault_up",
-		Help: "1 when the last Vault call succeeded, 0 otherwise.",
+	SecretLoaded = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "auth_secret_loaded",
+		Help: "1 when the Vault Secrets Operator has synced a usable secret, 0 otherwise.",
 	})
 )
 
@@ -60,10 +54,8 @@ func init() {
 	for _, result := range []string{"ok", "denied", "error"} {
 		TokensIssued.WithLabelValues(result)
 	}
-	for _, op := range []string{"userpass_login", "transit_sign", "transit_read_key"} {
-		for _, result := range []string{"ok", "error"} {
-			VaultRequests.WithLabelValues(op, result)
-		}
+	for _, result := range []string{"ok", "error"} {
+		SecretLoads.WithLabelValues(result)
 	}
-	VaultUp.Set(0)
+	SecretLoaded.Set(0)
 }

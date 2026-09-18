@@ -1,22 +1,24 @@
 // Package auth issues and describes JSON Web Tokens.
 //
-// There is no JWT library here on purpose. The signature comes from Vault, so a
-// library would only be assembling base64 segments -- and a JWT is clearer when
-// you can see that it is three base64url strings joined by dots.
+// There is no JWT library here on purpose: a JWT is three base64url segments
+// joined by dots, and seeing that is worth more in an example than the
+// convenience of a dependency.
 package auth
 
 import (
-	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"time"
 )
 
 // Claims is the token payload. Field names are the registered JWT claims;
-// anything custom belongs under a namespaced key, never a bare word that a
-// future registered claim might collide with.
+// anything custom belongs under a namespaced key, never a bare word a future
+// registered claim might collide with.
 type Claims struct {
 	Issuer    string   `json:"iss"`
 	Subject   string   `json:"sub"`
@@ -34,41 +36,31 @@ type header struct {
 	KeyID     string `json:"kid"`
 }
 
-// Signer is what auth needs from Vault. An interface, so the tests run without
-// a Vault.
-type Signer interface {
-	Sign(ctx context.Context, mount, key string, data []byte) ([]byte, int, error)
-}
-
-// encode builds the JWT and reports which key version actually signed it.
+// encode builds and signs the token.
 //
-// kid has to be inside the header, and the header is part of the signing input,
-// so the key version must be known before signing -- it is passed in from the
-// cached JWKS rather than discovered with an extra Vault round trip, because
-// this is the critical path of every login.
-//
-// Sign also returns the version it used. If the key rotated between the cache
-// being filled and the call landing, the returned version differs from the one
-// in the header, and the caller has to rebuild -- a token whose kid does not
-// match its signature fails verification in a way that is very hard to read.
-func encode(ctx context.Context, s Signer, mount, key string, version int, c Claims) (string, int, error) {
+// The signature covers exactly header.payload -- the same bytes a verifier
+// reconstructs. Signing anything else is the classic JWT bug: it verifies in
+// your own tests and nowhere else.
+func encode(key *rsa.PrivateKey, keyID string, c Claims) (string, error) {
 	payload, err := json.Marshal(c)
 	if err != nil {
-		return "", 0, fmt.Errorf("encode claims: %w", err)
+		return "", fmt.Errorf("encode claims: %w", err)
 	}
-
-	h, err := json.Marshal(header{Algorithm: "RS256", Type: "JWT", KeyID: strconv.Itoa(version)})
+	h, err := json.Marshal(header{Algorithm: "RS256", Type: "JWT", KeyID: keyID})
 	if err != nil {
-		return "", 0, fmt.Errorf("encode header: %w", err)
+		return "", fmt.Errorf("encode header: %w", err)
 	}
 
 	signingInput := b64(h) + "." + b64(payload)
-	sig, signedWith, err := s.Sign(ctx, mount, key, []byte(signingInput))
-	if err != nil {
-		return "", 0, err
-	}
+	sum := sha256.Sum256([]byte(signingInput))
 
-	return signingInput + "." + b64(sig), signedWith, nil
+	// PKCS#1 v1.5, not PSS: RS256 is defined as PKCS#1 v1.5. PSS is PS256 and
+	// every verifier expecting RS256 rejects it.
+	sig, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, sum[:])
+	if err != nil {
+		return "", fmt.Errorf("sign: %w", err)
+	}
+	return signingInput + "." + b64(sig), nil
 }
 
 func b64(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
@@ -78,9 +70,9 @@ func newClaims(issuer, audience, subject, jti string, ttl time.Duration, now tim
 		Issuer:   issuer,
 		Subject:  subject,
 		Audience: audience,
-		// One second of leeway on nbf absorbs clock skew between pods. Without
-		// it a token can be rejected as "not yet valid" by a verifier whose
-		// clock is a fraction behind.
+		// A second of leeway on nbf absorbs clock skew between pods; without it
+		// a verifier whose clock is a fraction behind rejects a fresh token as
+		// "not yet valid".
 		NotBefore: now.Add(-time.Second).Unix(),
 		IssuedAt:  now.Unix(),
 		ExpiresAt: now.Add(ttl).Unix(),

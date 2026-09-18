@@ -11,7 +11,7 @@ func TestLoadDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load with no environment: %v", err)
 	}
-	if c.HTTPAddr != ":8080" || c.VaultNamespace != "hp-dev-backend" {
+	if c.HTTPAddr != ":8080" || c.AdminAddr != ":9090" {
 		t.Errorf("unexpected defaults: %+v", c)
 	}
 	if c.TokenTTL != 15*time.Minute {
@@ -69,13 +69,13 @@ func TestBlankEnvFallsBackToDefault(t *testing.T) {
 
 // A trailing newline is invisible and breaks exact comparisons downstream.
 func TestValuesAreTrimmed(t *testing.T) {
-	t.Setenv("VAULT_NAMESPACE", "hp-dev-backend\n")
+	t.Setenv("SECRETS_DIR", "/etc/auth-service/secrets\n")
 	c, err := Load()
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if c.VaultNamespace != "hp-dev-backend" {
-		t.Errorf("VaultNamespace = %q, want it trimmed", c.VaultNamespace)
+	if c.SecretsDir != "/etc/auth-service/secrets" {
+		t.Errorf("SecretsDir = %q, want it trimmed", c.SecretsDir)
 	}
 }
 

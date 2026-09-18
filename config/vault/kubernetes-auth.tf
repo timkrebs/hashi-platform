@@ -31,16 +31,18 @@ resource "vault_kubernetes_auth_backend_config" "backend" {
 }
 
 # ---------------------------------------------------------------------------
-# JWT signing key
+# Transit -- NO LONGER USED by the auth service.
 #
-# Transit, not KV: the private key is generated inside Vault and can never be
-# read out (exportable = false). The auth service sends the bytes it wants
-# signed and gets a signature back -- it never holds the key, so a compromised
-# pod cannot mint tokens after it is stopped.
+# It was the signing key: the private key generated inside Vault and never
+# readable, with the service sending bytes to be signed. That required a direct
+# Vault call on every login. The service now reads its key from a Kubernetes
+# Secret that the Vault Secrets Operator syncs, and signs locally, so it makes
+# no Vault request at all.
 #
-# The cost is honest and worth stating: Vault becomes a hard runtime dependency
-# for issuing tokens. Verification stays independent, because verifiers use the
-# public key from JWKS.
+# The mount and key are kept rather than deleted because removing them takes
+# two applies: deletion_allowed was false, and Vault refuses to delete a key
+# while it is. This change flips the flag; a follow-up commit can drop both
+# resources once that has been applied.
 # ---------------------------------------------------------------------------
 
 resource "vault_mount" "backend_transit" {
@@ -61,11 +63,11 @@ resource "vault_transit_secret_backend_key" "auth_service_jwt" {
   type       = "rsa-2048"
   exportable = false
 
-  # Rotation is a Vault operation, not a Terraform one. Old versions stay
-  # available for verification, so tokens signed before a rotation keep working
-  # until they expire:
-  #   vault write -f -namespace=hp-dev-backend transit/keys/auth-service-jwt/rotate
-  deletion_allowed = false
+  # Flipped to true so the resource can be removed in a later apply. Vault
+  # refuses to delete a key while this is false, and Terraform cannot update
+  # and destroy in the same step -- removing the block without this would make
+  # the apply fail.
+  deletion_allowed = true
 }
 
 # ---------------------------------------------------------------------------
@@ -76,23 +78,32 @@ resource "vault_policy" "auth_service" {
   namespace = vault_namespace.backend.path_fq
   name      = "auth-service"
 
+  # Read-only, and only this one path. The Vault Secrets Operator logs in with
+  # this policy on the service's behalf and syncs the result into a Kubernetes
+  # Secret -- so this is the blast radius of the operator being compromised,
+  # not just of the service.
   policy = <<-EOT
-    # Sign JWTs. "update" is the capability Transit's sign endpoint requires --
-    # there is no separate "sign" capability.
-    path "${vault_mount.backend_transit.path}/sign/${vault_transit_secret_backend_key.auth_service_jwt.name}" {
-      capabilities = ["update"]
+    path "${vault_mount.backend_kv.path}/data/auth-service/*" {
+      capabilities = ["read"]
     }
 
-    # Read the public key to serve JWKS. This returns only public material.
-    path "${vault_mount.backend_transit.path}/keys/${vault_transit_secret_backend_key.auth_service_jwt.name}" {
-      capabilities = ["read"]
+    # kv-v2 keeps data and metadata apart; the operator reads metadata to notice
+    # a new version and resync.
+    path "${vault_mount.backend_kv.path}/metadata/auth-service/*" {
+      capabilities = ["read", "list"]
     }
   EOT
 }
 
-# Binds one ServiceAccount in one Kubernetes namespace to that policy. Both
-# bounds matter: without bound_service_account_namespaces any namespace could
-# create a ServiceAccount called "auth-service" and sign tokens.
+# Binds one ServiceAccount in one Kubernetes namespace to that policy.
+#
+# The Vault Secrets Operator does not use its own identity here: it requests a
+# token for THIS ServiceAccount and logs in as it. So the boundary stays per
+# namespace, and a second service gets its own role, policy and path rather
+# than sharing one.
+#
+# Both bounds matter: without bound_service_account_namespaces any namespace
+# could create a ServiceAccount called "auth-service" and read these secrets.
 resource "vault_kubernetes_auth_backend_role" "auth_service" {
   namespace = vault_namespace.backend.path_fq
   backend   = vault_auth_backend.backend_kubernetes.path

@@ -1,9 +1,10 @@
 // Command server runs the auth service.
 //
-// It issues short-lived RS256 JWTs. Credentials are checked against Vault's
-// userpass auth, and the signature is produced by Vault's Transit engine -- the
-// private key is generated inside Vault and never leaves it, so this process
-// cannot mint a token once its Vault token is gone.
+// It issues short-lived RS256 JWTs. The signing key and the user list come from
+// a Kubernetes Secret that the Vault Secrets Operator syncs out of Vault; this
+// process never talks to Vault itself. A Vault outage therefore does not stop
+// logins -- and a compromised pod holds a real signing key, which is the other
+// half of that trade.
 package main
 
 import (
@@ -18,12 +19,11 @@ import (
 	"github.com/timkrebs/auth-service/internal/config"
 	"github.com/timkrebs/auth-service/internal/httpapi"
 	"github.com/timkrebs/auth-service/internal/observability"
-	"github.com/timkrebs/auth-service/internal/vault"
+	"github.com/timkrebs/auth-service/internal/secrets"
 )
 
 func main() {
 	if err := run(); err != nil {
-		// The logger may not exist yet at this point, so use the default one.
 		slog.Error("fatal", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
@@ -38,24 +38,17 @@ func run() error {
 	log := observability.NewLogger(cfg.LogLevel)
 	slog.SetDefault(log)
 	log.Info("starting",
-		slog.String("vault_addr", cfg.VaultAddr),
-		slog.String("vault_namespace", cfg.VaultNamespace),
+		slog.String("secrets_dir", cfg.SecretsDir),
 		slog.Duration("token_ttl", cfg.TokenTTL))
 
-	// SIGTERM arrives first, then terminationGracePeriodSeconds, then SIGKILL.
-	// Cancelling ctx here is what lets in-flight requests finish.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	vc := vault.New(cfg.VaultAddr, cfg.VaultNamespace, cfg.VaultTokenPath, log)
-
-	svc := auth.NewService(vc, vc, vc, auth.Options{
-		TransitMount:  cfg.TransitMount,
-		SigningKey:    cfg.SigningKey,
-		UserpassMount: cfg.UserpassMount,
-		Issuer:        cfg.Issuer,
-		Audience:      cfg.Audience,
-		TokenTTL:      cfg.TokenTTL,
+	holder := &secrets.Holder{}
+	svc := auth.NewService(holder, holder, auth.Options{
+		Issuer:   cfg.Issuer,
+		Audience: cfg.Audience,
+		TokenTTL: cfg.TokenTTL,
 	})
 
 	ready := &observability.Readiness{}
@@ -64,31 +57,14 @@ func run() error {
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.Start(ctx) }()
 
-	// The Vault bootstrap runs in the background, and the listeners are already
-	// up before it starts.
+	// The listeners come up before the secret is read.
 	//
-	// The order matters: the Agent sidecar needs a moment to log in and write
-	// the token, and blocking here would leave /healthz unanswered for that
-	// whole window. The startup probe would read that as a dead process and
-	// kill the pod -- a restart loop whose cause is nowhere in the logs,
-	// because the process never got far enough to log anything.
-	//
-	// /readyz stays false until Vault actually answers, so the pod takes no
-	// traffic it cannot serve.
-	go func() {
-		if err := waitForToken(ctx, vc, log); err != nil {
-			return // context cancelled; shutdown is already under way
-		}
-		go vc.WatchToken(ctx, cfg.TokenRefresh)
-
-		if err := svc.Warm(ctx); err != nil {
-			log.Warn("initial key fetch failed; staying unready", slog.String("error", err.Error()))
-		} else {
-			ready.Set(true)
-			log.Info("ready")
-		}
-		pollReadiness(ctx, svc, ready, log)
-	}()
+	// Argo CD applies the Deployment and the VaultStaticSecret together, and
+	// the operator needs a moment to authenticate and fetch. Blocking here
+	// would leave /healthz unanswered through that window, the startup probe
+	// would read that as a dead process, and the pod would restart in a loop
+	// whose cause never reaches the log.
+	go loadSecrets(ctx, cfg, holder, ready, log)
 
 	select {
 	case err := <-errCh:
@@ -99,45 +75,48 @@ func run() error {
 		log.Info("shutdown signal received")
 	}
 
-	// Report unready immediately: the endpoint controller takes this pod out of
-	// rotation while the grace period drains what is already in flight.
+	// Report unready at once: the endpoint controller removes this pod while
+	// the grace period drains what is already in flight.
 	ready.Set(false)
 	return srv.Shutdown(cfg.ShutdownGrace)
 }
 
-// waitForToken blocks until the Agent sidecar has written the token file.
-func waitForToken(ctx context.Context, vc *vault.Client, log *slog.Logger) error {
-	const every = 2 * time.Second
-	for {
-		if err := vc.ReloadToken(); err == nil {
-			return nil
-		} else {
-			log.Info("waiting for vault agent token", slog.String("reason", err.Error()))
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(every):
-		}
-	}
-}
-
-// pollReadiness keeps /readyz honest after startup.
-func pollReadiness(ctx context.Context, svc *auth.Service, ready *observability.Readiness, log *slog.Logger) {
-	t := time.NewTicker(15 * time.Second)
+// loadSecrets retries until the mounted directory is readable.
+//
+// It keeps running afterwards. The operator restarts this Deployment on a
+// rotation (rolloutRestartTargets), so a reload is not the normal path -- but
+// re-reading costs nothing and covers the case where the Secret is updated in
+// place without a restart.
+func loadSecrets(ctx context.Context, cfg config.Config, holder *secrets.Holder, ready *observability.Readiness, log *slog.Logger) {
+	t := time.NewTicker(cfg.SecretsRetry)
 	defer t.Stop()
+
 	for {
+		store, err := secrets.Load(cfg.SecretsDir)
+		switch {
+		case err != nil && !holder.Loaded():
+			observability.SecretLoads.WithLabelValues("error").Inc()
+			// Not an error yet: the operator may simply not have written it.
+			log.Info("waiting for synced secret", slog.String("reason", err.Error()))
+		case err != nil:
+			observability.SecretLoads.WithLabelValues("error").Inc()
+			// It was there and now is not, or it became unreadable. Keep the
+			// key already in memory rather than dropping into a failed state.
+			log.Warn("secret reload failed, keeping the loaded one", slog.String("error", err.Error()))
+		default:
+			observability.SecretLoads.WithLabelValues("ok").Inc()
+			first := !holder.Loaded()
+			holder.Set(store)
+			ready.Set(true)
+			if first {
+				log.Info("secret loaded", slog.String("kid", store.KeyID()))
+			}
+		}
+
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			err := svc.Warm(checkCtx)
-			cancel()
-			if err != nil {
-				log.Warn("readiness check failed", slog.String("error", err.Error()))
-			}
-			ready.Set(err == nil)
 		}
 	}
 }

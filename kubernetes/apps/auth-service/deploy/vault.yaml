@@ -1,0 +1,69 @@
+# Anbindung an Vault -- ausschliesslich ueber den Vault Secrets Operator.
+#
+# Der Service selbst spricht nie mit Vault. Der Operator meldet sich mit dem
+# ServiceAccount DIESES Namespace an, liest den einen KV-Pfad, den die
+# Vault-Policy erlaubt, und legt das Ergebnis als gewoehnliches
+# Kubernetes-Secret ab. Der Pod mountet dieses Secret wie jedes andere.
+#
+# Alle drei Objekte sind namespace-lokal. Es gibt bewusst keine
+# defaultVaultConnection und keine defaultAuthMethod im Operator: eine
+# clusterweite Vault-Identitaet haette Zugriff auf alles, was irgendeine Policy
+# erlaubt. So bleibt die Grenze pro Namespace.
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultConnection
+metadata:
+  name: vault
+  namespace: auth-service
+spec:
+  address: https://vault.vault.svc:8200
+  # Das Secret legt kustomize aus deploy/vault-ca.pem an. Ohne die CA scheitert
+  # die Verbindung an "certificate signed by unknown authority" -- die
+  # cert-manager-CA steht in keinem System-Trust-Store.
+  caCertSecretRef: vault-ca
+  skipTLSVerify: false
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultAuth
+metadata:
+  name: auth-service
+  namespace: auth-service
+spec:
+  vaultConnectionRef: vault
+  # Vault-Enterprise-Namespace, nicht der Kubernetes-Namespace. Ohne diese
+  # Zeile meldet sich der Operator im root-Namespace an, wo der
+  # kubernetes-Mount gar nicht existiert.
+  namespace: hp-dev-backend
+  method: kubernetes
+  mount: kubernetes
+  kubernetes:
+    role: auth-service
+    # Der Operator fordert ein Token FUER diesen ServiceAccount an und meldet
+    # sich als dieser an. Die Vault-Rolle bindet genau diesen Namen in genau
+    # diesem Namespace -- die Identitaet gehoert also dem Service, nicht dem
+    # Operator.
+    serviceAccount: auth-service
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultStaticSecret
+metadata:
+  name: auth-service
+  namespace: auth-service
+spec:
+  vaultAuthRef: auth-service
+  mount: kv
+  type: kv-v2
+  path: auth-service/config
+  # Der Operator prueft in diesem Abstand auf eine neue Version.
+  refreshAfter: 60s
+  destination:
+    create: true
+    name: auth-service-secrets
+  # Rotation ohne Anwendungscode: aendert sich das Secret in Vault, startet der
+  # Operator das Deployment neu. Bewusst ein Neustart statt eines Reloads im
+  # laufenden Prozess -- ein Schluesselwechsel mitten im Betrieb wuerde Tokens
+  # mit altem und neuem Schluessel gleichzeitig in Umlauf bringen, und die kid
+  # leitet sich aus dem Schluessel ab.
+  rolloutRestartTargets:
+    - kind: Deployment
+      name: auth-service

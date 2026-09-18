@@ -9,47 +9,70 @@ long-lived credential of its own.
 
 ## Why it is built this way
 
-**The signing key lives in Transit, not in a file.** The usual pattern —
-mount a key from KV and sign locally — means a compromised pod can mint valid
-tokens for as long as it keeps the key, including after it is stopped. With
-Transit the pod sends the bytes to sign and gets a signature back; take its
-Vault token away and it can issue nothing.
+**The service never calls Vault.** The Vault Secrets Operator authenticates
+with *this namespace's* ServiceAccount, reads the one KV path its Vault policy
+allows, and writes the result into an ordinary Kubernetes Secret. The pod
+mounts that Secret as files. Vault is therefore not on the request path: if
+Vault is down, logins keep working from what is already on disk.
 
-The honest cost: Vault is now a hard runtime dependency for *issuing* tokens.
-*Verifying* them is unaffected — verifiers use the public key from JWKS and
-never call Vault or this service.
+The honest cost: the signing key now exists outside Vault — in etcd and in this
+pod's memory. EKS envelope-encrypts Secrets with KMS, and a rotation restarts
+the Deployment, but a compromised pod holds a real signing key and can mint
+tokens for as long as it runs. Signing through Vault's Transit engine avoided
+exactly that, at the price of a Vault round trip on every login and a hard
+runtime dependency. This is that trade taken deliberately.
 
-**Credentials are checked by Vault.** No password hashing, no user table, no
-credential store to leak. Adding a user is `vault write
-auth/userpass/users/...`, not a migration.
+**No passwords are stored here.** The user list is bcrypt hashes, synced from
+Vault. `Load` refuses to start if any entry is not a bcrypt hash, so a
+plaintext password is found by the pipeline rather than by a user.
 
 **Verification is decentralised.** Other services fetch
-`/.well-known/jwks.json` once, cache it, and verify locally. An auth service
-that must be asked about every request is a single point of failure for the
-whole cluster.
+`/.well-known/jwks.json`, cache it, and verify locally. An auth service that
+must be asked about every request is a single point of failure for the cluster.
 
-## The Vault chain
+**The `kid` is derived, not configured.** It is the RFC 7638 thumbprint of the
+public key, so it changes exactly when the key changes — a rotation cannot
+reuse a `kid` and leave verifiers matching a token against the wrong key.
+
+## The secret chain
 
 ```
-Pod                    ServiceAccount token (projected, short-lived)
-  │
-  ▼
-Vault Agent init       POST auth/kubernetes/login  ──▶ Vault
-  │                    Vault calls TokenReview on the API server to check it
-  │                    (needs system:auth-delegator on Vault's own SA)
-  ▼
-/vault/secrets/token   Vault token with policy "auth-service", TTL 1h
-  │                    sidecar renews it and rewrites the file
-  ▼
-auth-service           POST transit/sign/auth-service-jwt   → signature
-                       GET  transit/keys/auth-service-jwt   → public key
+VaultStaticSecret ──▶ Vault Secrets Operator
+                         │  logs in as ServiceAccount auth-service
+                         │  (VaultAuth, Vault namespace hp-dev-backend)
+                         ▼
+                      kv/auth-service/config
+                         │  signing-key  (RSA PEM)
+                         │  users        (JSON: username -> bcrypt hash)
+                         ▼
+              Secret auth-service-secrets
+                         │
+                         ▼  mounted read-only
+              /etc/auth-service/secrets/
 ```
 
-Every piece is Terraform in [`config/vault/kubernetes-auth.tf`](../../../config/vault/kubernetes-auth.tf):
-the `kubernetes` auth backend, the Transit mount and RSA key, the policy, and
-the role binding `ServiceAccount auth-service` in `namespace auth-service`.
-Both bounds matter — without `bound_service_account_namespaces` any namespace
-could create a ServiceAccount with this name and sign tokens.
+`deploy/vault.yaml` holds all three custom resources, and they are all
+namespace-local. The operator is installed with `defaultVaultConnection` and
+`defaultAuthMethod` disabled on purpose: a cluster-wide Vault identity would
+reach everything any policy allows, while this way the boundary stays per
+namespace.
+
+The Vault side is Terraform in
+[`config/vault/kubernetes-auth.tf`](../../../config/vault/kubernetes-auth.tf):
+the `kubernetes` auth backend, a read-only policy on one KV path, and a role
+bound to `ServiceAccount auth-service` in `namespace auth-service`. Both bounds
+matter — without `bound_service_account_namespaces` any namespace could create
+a ServiceAccount with this name and read the key.
+
+### Rotation
+
+Write a new key to Vault; the operator notices within `refreshAfter` and
+restarts the Deployment through `rolloutRestartTargets`. The new pod publishes
+a new `kid`.
+
+Tokens signed by the old key stop verifying at that moment. The TTL is short,
+which bounds the damage; if that is not good enough, publish the previous key
+in JWKS for one TTL's worth of overlap.
 
 ## Endpoints
 
@@ -65,17 +88,22 @@ Admin (`:9090`, never published outside the cluster):
 | | |
 |---|---|
 | `GET /metrics` | Prometheus |
-| `GET /healthz` | liveness — does **not** touch Vault |
-| `GET /readyz` | readiness — does |
+| `GET /healthz` | liveness — does **not** depend on the secret |
+| `GET /readyz` | readiness — true once the secret is synced and parsed |
 
 Two listeners rather than one: metrics expose internal timing and `/readyz`
 reveals dependency state, and neither belongs on the port that serves
 untrusted callers.
 
-**Liveness must not depend on Vault.** If it did, a Vault restart would make
-Kubernetes kill every auth pod at once and turn a short blip into an outage.
+**Liveness must not depend on the secret.** If it did, a sync problem would
+make Kubernetes restart every auth pod instead of taking them out of rotation.
 Readiness is where the dependency belongs: an unready pod leaves the Service
 endpoints; an unhealthy one is restarted.
+
+The pod starts before the operator has written the Secret — Argo CD applies the
+Deployment and the `VaultStaticSecret` in the same wave. The listeners come up
+first and the service reports unready until the files appear, so the startup
+probe does not read the sync window as a dead process.
 
 ## Verifying a token elsewhere
 
@@ -116,9 +144,10 @@ Metrics are scraped through the ServiceMonitor in `deploy/`. Every label is
 bounded; the `route` label is the registered pattern, never the request path,
 because a path label creates one time series per URL.
 
-`auth_vault_up` is the same signal `/readyz` reports, as a number to alert on.
-`auth_vault_request_duration_seconds{operation="transit_sign"}` is the one to
-watch — signing is on the critical path of every login.
+`auth_secret_loaded` is the same signal `/readyz` reports, as a number to alert
+on. `auth_secret_loads_total{result="error"}` rising while
+`auth_secret_loaded` stays 1 means rotation is failing silently — the service
+keeps working on the key it already has, and nothing else would tell you.
 
 ## Build and deploy
 
@@ -159,8 +188,18 @@ crashing. The same script is what the pipeline runs.
 
 ## Before this runs
 
-- [ ] `terraform apply` on `config/vault` — the `kubernetes` auth backend,
-      Transit mount, policy and role do not exist yet
+- [ ] `terraform apply` on `config/vault`
+- [ ] the Vault Secrets Operator is running (`gitops/apps/vault-secrets-operator.yaml`)
+- [ ] the KV secret exists — it is written out of band, never by Terraform,
+      because a signing key in Terraform state defeats the point:
+      ```bash
+      openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out signing.pem
+      htpasswd -bnBC 12 "" 'the-password' | tr -d ':\n'   # bcrypt hash
+      vault kv put -namespace=hp-dev-backend kv/auth-service/config \
+        signing-key=@signing.pem \
+        users='{"dev1":"<bcrypt-hash>"}'
+      rm signing.pem
+      ```
 - [ ] a push to `main` has run the pipeline once, so the image exists and
       `deploy/kustomization.yaml` pins its tag
 - [ ] `deploy/vault-ca.pem` still matches the cluster:
@@ -181,8 +220,9 @@ through the `vpc-cni` addon configuration (`enableNetworkPolicy = "true"`) in
 `infra/modules/aws-eks-cluster`.
 
 **No rate limiting.** `POST /v1/token` is an unauthenticated endpoint that
-performs an RSA signature. Both make it worth a per-IP limit before anything
-real depends on it.
+performs a bcrypt comparison and an RSA signature. Both are deliberately
+expensive, which is what makes the endpoint worth a per-IP limit before
+anything real depends on it.
 
 **Tokens cannot be revoked.** That is inherent to stateless JWTs. The TTL is
 the mitigation; a denylist would mean asking a central service on every
