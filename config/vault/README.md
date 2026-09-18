@@ -71,7 +71,10 @@ vault.vault.svc.cluster.local, *.vault-internal, ...
 not k8s-vault-vaultui-....elb.us-east-1.amazonaws.com
 ```
 
-Set `vault_tls_server_name` to `vault.vault.svc.cluster.local`. The connection
+`vault_tls_server_name` defaults to `vault.vault.svc.cluster.local` for exactly
+this reason. It is a default rather than something you have to set, because a
+null default here fails silently: the configuration looks correct and the
+connection fails as if the setting were not there at all. The connection
 still goes to the load balancer and the chain is still verified against the CA —
 only the name check is redirected to a name the certificate carries. A man in
 the middle would still need a certificate from that same private CA.
