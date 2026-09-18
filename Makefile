@@ -60,3 +60,8 @@ plan: ## Speculative plan for ENV/LAYER (default dev/cluster) against its HCP Te
 
 clean: ## Remove local .terraform directories
 	find infra -type d -name .terraform -prune -exec rm -rf {} +
+
+services:
+	cd kubernetes/apps/ \
+		&& cd auth-service && make check \
+		&& cd ../queue-worker && make check

@@ -49,13 +49,6 @@ func run() error {
 
 	vc := vault.New(cfg.VaultAddr, cfg.VaultNamespace, cfg.VaultTokenPath, log)
 
-	// The Agent sidecar writes the token before this container is expected to
-	// work, but "before" is not guaranteed on a cold start, so wait for it.
-	if err := waitForToken(ctx, vc, log); err != nil {
-		return err
-	}
-	go vc.WatchToken(ctx, cfg.TokenRefresh)
-
 	svc := auth.NewService(vc, vc, vc, auth.Options{
 		TransitMount:  cfg.TransitMount,
 		SigningKey:    cfg.SigningKey,
@@ -66,19 +59,36 @@ func run() error {
 	})
 
 	ready := &observability.Readiness{}
-	// Fetch the keys once so the first /readyz tells the truth and the pod does
-	// not take traffic before it can serve it.
-	if err := svc.Warm(ctx); err != nil {
-		log.Warn("initial key fetch failed; starting unready", slog.String("error", err.Error()))
-	} else {
-		ready.Set(true)
-	}
-	go pollReadiness(ctx, svc, ready, log)
-
-	srv := httpapi.New(svc, log, ready, cfg.HTTPAddr, ":9090")
+	srv := httpapi.New(svc, log, ready, cfg.HTTPAddr, cfg.AdminAddr)
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.Start(ctx) }()
+
+	// The Vault bootstrap runs in the background, and the listeners are already
+	// up before it starts.
+	//
+	// The order matters: the Agent sidecar needs a moment to log in and write
+	// the token, and blocking here would leave /healthz unanswered for that
+	// whole window. The startup probe would read that as a dead process and
+	// kill the pod -- a restart loop whose cause is nowhere in the logs,
+	// because the process never got far enough to log anything.
+	//
+	// /readyz stays false until Vault actually answers, so the pod takes no
+	// traffic it cannot serve.
+	go func() {
+		if err := waitForToken(ctx, vc, log); err != nil {
+			return // context cancelled; shutdown is already under way
+		}
+		go vc.WatchToken(ctx, cfg.TokenRefresh)
+
+		if err := svc.Warm(ctx); err != nil {
+			log.Warn("initial key fetch failed; staying unready", slog.String("error", err.Error()))
+		} else {
+			ready.Set(true)
+			log.Info("ready")
+		}
+		pollReadiness(ctx, svc, ready, log)
+	}()
 
 	select {
 	case err := <-errCh:

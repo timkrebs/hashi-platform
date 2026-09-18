@@ -23,6 +23,7 @@ import (
 type stubVault struct {
 	key       *rsa.PrivateKey
 	denyLogin bool
+	vaultDown bool
 }
 
 func (s *stubVault) Sign(_ context.Context, _, _ string, data []byte) ([]byte, int, error) {
@@ -31,15 +32,49 @@ func (s *stubVault) Sign(_ context.Context, _, _ string, data []byte) ([]byte, i
 	return sig, 1, err
 }
 
+// vaultStatusErr carries an HTTP status the way the Vault client's APIError
+// does: a 4xx is a rejection, anything else is an outage.
+type vaultStatusErr struct{ code int }
+
+func (e vaultStatusErr) Error() string   { return "vault status" }
+func (e vaultStatusErr) StatusCode() int { return e.code }
+
 func (s *stubVault) VerifyUserpass(_ context.Context, _, _, _ string) error {
+	if s.vaultDown {
+		return io.ErrUnexpectedEOF // a transport failure, not a rejection
+	}
 	if s.denyLogin {
-		return io.EOF // any error means "denied"
+		return vaultStatusErr{code: 400}
 	}
 	return nil
 }
 
 func (s *stubVault) PublicKeys(_ context.Context, _, _ string) (map[int]*rsa.PublicKey, int, error) {
 	return map[int]*rsa.PublicKey{1: &s.key.PublicKey}, 1, nil
+}
+
+// An outage must surface as 503, never as 401 -- otherwise the status code
+// itself misleads whoever is debugging.
+func TestTokenEndpointReportsVaultOutageAsUnavailable(t *testing.T) {
+	s := newTestServer(t, false)
+	s.auth = nil // replaced below
+	k, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("key: %v", err)
+	}
+	sv := &stubVault{key: k, vaultDown: true}
+	s.auth = auth.NewService(sv, sv, sv, auth.Options{
+		TransitMount: "transit", SigningKey: "k", UserpassMount: "userpass",
+		Issuer: "https://auth.test", Audience: "test", TokenTTL: time.Minute,
+	})
+
+	rec := httptest.NewRecorder()
+	s.handleToken(rec, httptest.NewRequest(http.MethodPost, "/v1/token",
+		strings.NewReader(`{"username":"dev1","password":"pw"}`)))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 when Vault is unreachable", rec.Code)
+	}
 }
 
 func newTestServer(t *testing.T, deny bool) *Server {

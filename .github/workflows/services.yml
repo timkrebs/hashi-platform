@@ -1,0 +1,420 @@
+# Build pipeline for the Go services under kubernetes/apps/.
+#
+#   discover -> fmt -> vet -> test -> build -> container-test -> scan -> push -> bump
+#
+# Chained rather than parallel, like terraform.yml: the first failure names the
+# stage it belongs to instead of turning four boxes red at once.
+#
+# The images go to GHCR, not ECR, for two reasons. An ECR address contains the
+# AWS account ID and this repository is public. And pushing to GHCR needs only
+# the built-in GITHUB_TOKEN with packages: write -- no OIDC against AWS, which
+# this account blocks anyway. A public repository's packages can be public, so
+# the kubelet pulls them with no imagePullSecret.
+#
+# One image is built once and then tested, scanned and pushed as the same
+# artifact. Rebuilding between stages would mean scanning something other than
+# what ships.
+#
+# Services are discovered, not listed: any directory under kubernetes/apps/
+# holding both a go.mod and a Dockerfile joins the pipeline on its own.
+name: Services
+
+on:
+  # The path lists are duplicated on purpose: GitHub Actions does not support
+  # YAML anchors and rejects a workflow that uses them at parse time.
+  pull_request:
+    branches: [main]
+    paths:
+      - "kubernetes/apps/**"
+      - ".github/workflows/services.yml"
+  push:
+    branches: [main]
+    paths:
+      - "kubernetes/apps/**"
+      - ".github/workflows/services.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: services-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REGISTRY: ghcr.io
+  TRIVY_VERSION: "0.58.1"
+
+jobs:
+  discover:
+    name: discover
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.find.outputs.services }}
+      count: ${{ steps.find.outputs.count }}
+      tag: ${{ steps.find.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: find
+        name: Find buildable services
+        run: |
+          # Both files are required: a directory with only manifests (rabbitmq)
+          # has nothing to build, and one with only Go source cannot be shipped.
+          services=()
+          for dir in kubernetes/apps/*/; do
+            [ -f "${dir}go.mod" ] && [ -f "${dir}Dockerfile" ] || continue
+            services+=("$(basename "${dir}")")
+          done
+
+          json=$(printf '%s\n' "${services[@]}" | jq -R . | jq -sc 'map(select(length > 0))')
+          # Immutable, sortable, and traceable back to a commit. The bump stage
+          # writes exactly this into the Kustomize manifests.
+          tag="sha-$(git rev-parse --short=12 HEAD)"
+
+          {
+            echo "services=${json}"
+            echo "count=${#services[@]}"
+            echo "tag=${tag}"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Services"
+            echo
+            for s in "${services[@]}"; do echo "- \`${s}\`"; done
+            echo
+            echo "Image tag: \`${tag}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    needs: discover
+    if: needs.discover.outputs.count != '0'
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.discover.outputs.services) }}
+    defaults:
+      run:
+        working-directory: kubernetes/apps/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          # Each service's own go.mod decides the toolchain, so they can move
+          # independently.
+          go-version-file: kubernetes/apps/${{ matrix.service }}/go.mod
+          cache-dependency-path: kubernetes/apps/${{ matrix.service }}/go.sum
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "${unformatted}" ]; then
+            echo "::error::gofmt would change: ${unformatted}"
+            gofmt -d .
+            exit 1
+          fi
+      - name: go.mod is tidy
+        run: |
+          # A stale go.mod builds fine locally and then fails in a clean
+          # container build, which is a confusing place to find out.
+          cp go.mod go.mod.bak && cp go.sum go.sum.bak
+          go mod tidy
+          if ! diff -q go.mod go.mod.bak >/dev/null || ! diff -q go.sum go.sum.bak >/dev/null; then
+            echo "::error::go mod tidy changes go.mod/go.sum -- commit the result"
+            diff -u go.mod.bak go.mod || true
+            exit 1
+          fi
+
+  vet:
+    name: vet
+    runs-on: ubuntu-latest
+    needs: [discover, fmt]
+    if: needs.discover.outputs.count != '0'
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.discover.outputs.services) }}
+    defaults:
+      run:
+        working-directory: kubernetes/apps/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: kubernetes/apps/${{ matrix.service }}/go.mod
+          cache-dependency-path: kubernetes/apps/${{ matrix.service }}/go.sum
+      - run: go vet ./...
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@2026.2.1
+          staticcheck ./...
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    needs: [discover, vet]
+    if: needs.discover.outputs.count != '0'
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.discover.outputs.services) }}
+    defaults:
+      run:
+        working-directory: kubernetes/apps/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: kubernetes/apps/${{ matrix.service }}/go.mod
+          cache-dependency-path: kubernetes/apps/${{ matrix.service }}/go.sum
+
+      - name: go test
+        run: go test ./... -race -count=1 -coverprofile=cover.out
+
+      - name: Coverage summary
+        run: |
+          {
+            echo "### Coverage — \`${{ matrix.service }}\`"
+            echo
+            echo '```text'
+            go tool cover -func=cover.out | tail -20
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: govulncheck
+        run: |
+          # Known vulnerabilities in the dependency tree AND in the Go
+          # toolchain itself. Unlike a generic scanner it only reports issues
+          # on code paths this binary actually reaches.
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  build:
+    name: build container
+    runs-on: ubuntu-latest
+    needs: [discover, test]
+    if: needs.discover.outputs.count != '0'
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.discover.outputs.services) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: kubernetes/apps/${{ matrix.service }}
+          push: false
+          # A tarball rather than a push: the same bytes are what the next
+          # three stages test, scan and ship. amd64 only -- every node in this
+          # cluster is a t3.medium. Add linux/arm64 here if that changes.
+          platforms: linux/amd64
+          outputs: type=docker,dest=/tmp/${{ matrix.service }}.tar
+          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.service }}:${{ needs.discover.outputs.tag }}
+          provenance: false
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      - name: Image size
+        run: |
+          size=$(du -h "/tmp/${{ matrix.service }}.tar" | cut -f1)
+          echo "- \`${{ matrix.service }}\` image archive: ${size}" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-${{ matrix.service }}
+          path: /tmp/${{ matrix.service }}.tar
+          retention-days: 1
+
+  container-test:
+    name: test container
+    runs-on: ubuntu-latest
+    needs: [discover, build]
+    if: needs.discover.outputs.count != '0'
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.discover.outputs.services) }}
+    env:
+      # Literal ghcr.io, not ${{ env.REGISTRY }}: the env context is not
+      # available in a job-level env block, so the reference would expand to
+      # nothing and every image ref below would be silently malformed.
+      IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}:${{ needs.discover.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: image-${{ matrix.service }}
+          path: /tmp
+      - run: docker load --input /tmp/${{ matrix.service }}.tar
+
+      - name: Image runs as non-root
+        run: |
+          # A distroless image that somehow ended up running as root would pass
+          # every unit test and then be rejected by the namespace's restricted
+          # Pod Security policy at deploy time.
+          user=$(docker image inspect "${IMAGE}" --format '{{.Config.User}}')
+          if [ "${user}" = "" ] || [ "${user}" = "root" ] || [ "${user}" = "0" ]; then
+            echo "::error::image runs as '${user:-root}'; the restricted Pod Security profile requires a non-root user"
+            exit 1
+          fi
+          echo "runs as ${user}"
+
+      - name: Smoke test
+        run: |
+          script="kubernetes/apps/${{ matrix.service }}/ci/smoke.sh"
+          if [ ! -x "${script}" ]; then
+            echo "::notice::${{ matrix.service }} has no ci/smoke.sh; only the image checks above ran."
+            exit 0
+          fi
+          "${script}" "${IMAGE}"
+
+  scan:
+    name: scan container
+    runs-on: ubuntu-latest
+    needs: [discover, container-test]
+    if: needs.discover.outputs.count != '0'
+    permissions:
+      contents: read
+      # Uploading SARIF puts findings in the repository's Security tab, where
+      # they are tracked over time instead of scrolling past in a log.
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.discover.outputs.services) }}
+    env:
+      # Literal ghcr.io, not ${{ env.REGISTRY }}: the env context is not
+      # available in a job-level env block, so the reference would expand to
+      # nothing and every image ref below would be silently malformed.
+      IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}:${{ needs.discover.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: image-${{ matrix.service }}
+          path: /tmp
+      - run: docker load --input /tmp/${{ matrix.service }}.tar
+
+      - name: Trivy — report everything
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}
+          format: sarif
+          output: trivy.sarif
+          severity: LOW,MEDIUM,HIGH,CRITICAL
+          # Never fail on this pass; its job is to record, not to gate.
+          exit-code: "0"
+        env:
+          TRIVY_SKIP_DB_UPDATE: "false"
+
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-${{ matrix.service }}
+
+      - name: Trivy — gate on HIGH and CRITICAL
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}
+          format: table
+          severity: HIGH,CRITICAL
+          # Only fixable findings block. An unfixed CVE in the base image
+          # cannot be actioned by this pipeline, and a gate nobody can pass
+          # gets switched off rather than fixed.
+          ignore-unfixed: true
+          exit-code: "1"
+
+  push:
+    name: push to GHCR
+    runs-on: ubuntu-latest
+    needs: [discover, scan]
+    if: needs.discover.outputs.count != '0' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.discover.outputs.services) }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: image-${{ matrix.service }}
+          path: /tmp
+      - run: docker load --input /tmp/${{ matrix.service }}.tar
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push
+        id: push
+        run: |
+          repo="${REGISTRY}/${{ github.repository_owner }}/${{ matrix.service }}"
+          sha_tag="${{ needs.discover.outputs.tag }}"
+
+          # The scanned tarball is pushed as-is. "latest" is a second name for
+          # the same image, for humans -- the manifests always pin the sha tag,
+          # because a moving tag makes a rollback guesswork.
+          docker tag "${repo}:${sha_tag}" "${repo}:latest"
+          docker push "${repo}:${sha_tag}"
+          docker push "${repo}:latest"
+
+          digest=$(docker inspect --format='{{index .RepoDigests 0}}' "${repo}:${sha_tag}")
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "- \`${repo}:${sha_tag}\` → \`${digest}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  bump:
+    name: bump manifests
+    runs-on: ubuntu-latest
+    needs: [discover, push]
+    if: needs.discover.outputs.count != '0' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The default token cannot push; this one can, and the commit message
+          # carries [skip ci] so the resulting push does not start this
+          # workflow again.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Point Kustomize at the new tag
+        run: |
+          tag="${{ needs.discover.outputs.tag }}"
+          changed=0
+          for service in $(echo '${{ needs.discover.outputs.services }}' | jq -r '.[]'); do
+            file="kubernetes/apps/${service}/deploy/kustomization.yaml"
+            [ -f "${file}" ] || continue
+            # Only the newTag line under images:, nothing else in the file.
+            if sed -i -E "s|^(\s*newTag:\s*).*$|\1${tag}|" "${file}" && ! git diff --quiet -- "${file}"; then
+              echo "updated ${file} -> ${tag}"
+              changed=1
+            fi
+          done
+          echo "changed=${changed}" >> "$GITHUB_ENV"
+
+      - name: Commit
+        if: env.changed == '1'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kubernetes/apps/*/deploy/kustomization.yaml
+          git commit -m "ci: deploy ${{ needs.discover.outputs.tag }} [skip ci]"
+          git push
+
+          {
+            echo "### Deployed"
+            echo
+            echo "Manifests now pin \`${{ needs.discover.outputs.tag }}\`. Argo CD picks this up on its next sync."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Nothing to bump
+        if: env.changed != '1'
+        run: echo "::notice::No kustomization.yaml changed; the manifests already pin this tag."

@@ -14,6 +14,7 @@ import (
 // than run with a plausible-looking wrong one.
 type Config struct {
 	HTTPAddr       string
+	AdminAddr      string
 	VaultAddr      string
 	VaultNamespace string
 	VaultTokenPath string
@@ -31,7 +32,10 @@ type Config struct {
 // Load reads the environment and validates it.
 func Load() (Config, error) {
 	c := Config{
-		HTTPAddr:       env("HTTP_ADDR", ":8080"),
+		HTTPAddr: env("HTTP_ADDR", ":8080"),
+		// Metrics and health. Separate listener, never published outside
+		// the cluster -- see internal/httpapi/server.go.
+		AdminAddr:      env("ADMIN_ADDR", ":9090"),
 		VaultAddr:      env("VAULT_ADDR", "https://vault.vault.svc:8200"),
 		VaultNamespace: env("VAULT_NAMESPACE", "hp-dev-backend"),
 		// Written by the Vault Agent sidecar, not by us. See deploy/deployment.yaml.

@@ -120,24 +120,49 @@ because a path label creates one time series per URL.
 `auth_vault_request_duration_seconds{operation="transit_sign"}` is the one to
 watch — signing is on the critical path of every login.
 
-## Deploying
+## Build and deploy
 
-Argo CD reconciles it from `gitops/apps/auth-service.yaml`.
+`.github/workflows/services.yml` does it:
 
-```bash
-make check                 # fmt, vet, test
-make image push TAG=v0.1.0
+```
+discover -> fmt -> vet -> test -> build -> container-test -> scan -> push -> bump
 ```
 
-Image builds run locally: this AWS account blocks GitHub OIDC. The image
-reference is GHCR rather than ECR because an ECR address contains the AWS
-account ID and this repository is public.
+`fmt` also checks that `go mod tidy` is a no-op. `vet` runs staticcheck.
+`test` adds `-race` and `govulncheck`. The image is built **once** and the same
+tarball is then smoke-tested, scanned by Trivy and pushed — rebuilding between
+stages would mean scanning something other than what ships.
+
+GHCR rather than ECR for two reasons: an ECR address contains the AWS account
+ID and this repository is public, and pushing to GHCR needs only the built-in
+`GITHUB_TOKEN` with `packages: write` — no OIDC against AWS, which this account
+blocks. A public repository's packages can be public, so the kubelet pulls them
+with no `imagePullSecret`.
+
+On a push to `main` the image is tagged `sha-<12>` and the `bump` stage writes
+that tag into `deploy/kustomization.yaml` and commits it with `[skip ci]`. Argo
+CD deploys what is in git, so that commit *is* the deployment. The manifests
+never pin `latest`: a moving tag makes a rollback guesswork.
+
+Locally:
+
+```bash
+make check                          # fmt, vet, test
+make image
+ci/smoke.sh ghcr.io/timkrebs/auth-service:v0.1.0
+```
+
+`ci/smoke.sh` runs the image as shipped — distroless, non-root, read-only root
+filesystem — with no Vault anywhere, and asserts that `/healthz` answers, that
+`/readyz` does not, and that `POST /v1/token` degrades to 503 rather than
+crashing. The same script is what the pipeline runs.
 
 ## Before this runs
 
 - [ ] `terraform apply` on `config/vault` — the `kubernetes` auth backend,
       Transit mount, policy and role do not exist yet
-- [ ] image built and pushed; tag matches `deploy/kustomization.yaml`
+- [ ] a push to `main` has run the pipeline once, so the image exists and
+      `deploy/kustomization.yaml` pins its tag
 - [ ] `deploy/vault-ca.pem` still matches the cluster:
       ```bash
       kubectl -n vault get secret vault-tls -o jsonpath='{.data.ca\.crt}' \

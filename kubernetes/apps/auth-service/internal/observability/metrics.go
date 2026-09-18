@@ -44,3 +44,26 @@ var (
 		Help: "1 when the last Vault call succeeded, 0 otherwise.",
 	})
 )
+
+// init publishes the series whose label values are known in advance.
+//
+// A CounterVec emits nothing at all until some label combination is touched --
+// not even a # TYPE line. On a freshly started pod that means
+// rate(auth_tokens_issued_total{result="denied"}[5m]) returns *empty*, not
+// zero, so a panel shows "No data" and an alert on it never fires because
+// there is nothing to compare against.
+//
+// Only bounded, known-in-advance label sets belong here. Routes and status
+// classes are left to appear on first use: pre-seeding them would mean
+// guessing which combinations exist.
+func init() {
+	for _, result := range []string{"ok", "denied", "error"} {
+		TokensIssued.WithLabelValues(result)
+	}
+	for _, op := range []string{"userpass_login", "transit_sign", "transit_read_key"} {
+		for _, result := range []string{"ok", "error"} {
+			VaultRequests.WithLabelValues(op, result)
+		}
+	}
+	VaultUp.Set(0)
+}

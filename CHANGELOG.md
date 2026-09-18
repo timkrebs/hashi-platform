@@ -116,6 +116,16 @@ for the modules once they are tagged.
 - The pipeline plans and applies `config/vault` after the platform layer, and
   posts a speculative Vault plan on pull requests. The stage carries no
   `-var-file`, and is skipped until the `hashi-platform-vault` workspace exists.
+- `services.yml`: the build pipeline for the Go services —
+  discover, fmt, vet, test, build, container-test, scan, push, bump. Services
+  are discovered rather than listed: any directory under `kubernetes/apps/`
+  with a `go.mod` and a `Dockerfile` joins on its own. The image is built once
+  and the same tarball is smoke-tested, Trivy-scanned and pushed, so what is
+  scanned is what ships. Images go to GHCR, which needs only the built-in
+  `GITHUB_TOKEN` and no AWS OIDC, and a public repository's packages pull
+  without an `imagePullSecret`. On `main` the `bump` stage writes the new
+  `sha-<12>` tag into the Kustomize manifests and commits it with `[skip ci]`,
+  which is what makes Argo CD deploy it.
 - `auth-service`: a reference microservice under `kubernetes/apps/`. It issues
   short-lived RS256 JWTs, verifies credentials against Vault's userpass auth,
   and signs with Vault's Transit engine, so the private key is generated inside

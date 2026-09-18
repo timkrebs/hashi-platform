@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -59,8 +60,16 @@ var ErrInvalidCredentials = fmt.Errorf("invalid credentials")
 // Issue verifies credentials and returns a signed token.
 func (s *Service) Issue(ctx context.Context, username, password string, scopes []string) (string, time.Time, error) {
 	if err := s.verifier.VerifyUserpass(ctx, s.opts.UserpassMount, username, password); err != nil {
-		observability.TokensIssued.WithLabelValues("denied").Inc()
-		return "", time.Time{}, ErrInvalidCredentials
+		// Only a 4xx means the credentials were actually rejected. A refused
+		// connection or a 5xx means Vault could not answer -- reporting that as
+		// "invalid username or password" sends every user and every operator
+		// looking for a credentials problem during a Vault outage.
+		if isRejection(err) {
+			observability.TokensIssued.WithLabelValues("denied").Inc()
+			return "", time.Time{}, ErrInvalidCredentials
+		}
+		observability.TokensIssued.WithLabelValues("error").Inc()
+		return "", time.Time{}, fmt.Errorf("verify credentials: %w", err)
 	}
 
 	jti, err := newJTI()
@@ -98,6 +107,20 @@ func (s *Service) Issue(ctx context.Context, username, password string, scopes [
 
 	observability.TokensIssued.WithLabelValues("ok").Inc()
 	return token, time.Unix(claims.ExpiresAt, 0).UTC(), nil
+}
+
+// isRejection reports whether the error carries a 4xx status, which is how the
+// verifier says "these credentials are wrong" as opposed to "I am broken".
+//
+// Checked through an interface rather than a concrete type so this package
+// stays independent of the Vault client.
+func isRejection(err error) bool {
+	var se interface{ StatusCode() int }
+	if !errors.As(err, &se) {
+		return false
+	}
+	code := se.StatusCode()
+	return code >= 400 && code < 500
 }
 
 // JWK is one entry of the JWKS document.

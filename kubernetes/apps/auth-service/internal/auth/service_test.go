@@ -21,8 +21,16 @@ type fakeVault struct {
 	version   atomic.Int64
 	signCalls atomic.Int64
 	denyLogin bool
+	loginErr  error
 	signErr   error
 }
+
+// statusErr mimics the Vault client's APIError: it carries the HTTP status, and
+// that status is how a rejection is told apart from an outage.
+type statusErr struct{ code int }
+
+func (e statusErr) Error() string   { return "vault status" }
+func (e statusErr) StatusCode() int { return e.code }
 
 func newFakeVault(t *testing.T) *fakeVault {
 	t.Helper()
@@ -49,8 +57,12 @@ func (f *fakeVault) Sign(_ context.Context, _, _ string, data []byte) ([]byte, i
 }
 
 func (f *fakeVault) VerifyUserpass(_ context.Context, _, _, _ string) error {
+	if f.loginErr != nil {
+		return f.loginErr
+	}
 	if f.denyLogin {
-		return errors.New("permission denied")
+		// Vault answers a wrong password with 400, not with a transport error.
+		return statusErr{code: 400}
 	}
 	return nil
 }
@@ -182,6 +194,48 @@ func TestIssueFailsWhenVaultCannotSign(t *testing.T) {
 	}
 	if token != "" {
 		t.Errorf("returned a token despite the signing failure: %q", token)
+	}
+}
+
+// A Vault outage must NOT be reported as bad credentials. Getting this wrong
+// tells every user their password is wrong during an outage, and sends whoever
+// is on call looking for a credentials problem.
+func TestVaultOutageIsNotReportedAsBadCredentials(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "connection refused", err: errors.New("dial tcp 10.0.0.1:8200: connect: connection refused")},
+		{name: "vault 500", err: statusErr{code: 500}},
+		{name: "vault 503", err: statusErr{code: 503}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeVault(t)
+			f.loginErr = tc.err
+			svc := newService(f)
+
+			_, _, err := svc.Issue(context.Background(), "dev1", "pw", nil)
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if errors.Is(err, ErrInvalidCredentials) {
+				t.Errorf("reported a Vault outage as invalid credentials: %v", err)
+			}
+		})
+	}
+}
+
+// A 4xx from Vault really is a rejection and must stay one.
+func TestVault4xxIsReportedAsBadCredentials(t *testing.T) {
+	for _, code := range []int{400, 401, 403} {
+		f := newFakeVault(t)
+		f.loginErr = statusErr{code: code}
+		svc := newService(f)
+
+		_, _, err := svc.Issue(context.Background(), "dev1", "pw", nil)
+		if !errors.Is(err, ErrInvalidCredentials) {
+			t.Errorf("status %d gave %v, want ErrInvalidCredentials", code, err)
+		}
 	}
 }
 

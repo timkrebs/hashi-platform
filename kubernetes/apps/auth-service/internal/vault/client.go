@@ -173,6 +173,12 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("vault returned %d: %s", e.Status, e.Body)
 }
 
+// StatusCode lets callers classify the failure without importing this package.
+// A 4xx from the login endpoint means the credentials were rejected; anything
+// else means Vault could not answer, and the two must not look the same to the
+// user.
+func (e *APIError) StatusCode() int { return e.Status }
+
 // VerifyUserpass checks a username and password against Vault's userpass auth.
 //
 // Credential verification is delegated to Vault on purpose: this service never
