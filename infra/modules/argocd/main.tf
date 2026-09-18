@@ -30,7 +30,11 @@ resource "helm_release" "this" {
 
     configs = {
       params = {
-        "server.insecure" = var.server_insecure
+        # Forced off behind a load balancer: the NLB passes TCP straight
+        # through, so argocd-server has to terminate TLS itself. Left insecure
+        # it serves plain HTTP on 8080, the TLS handshake on 443 is reset, and
+        # the only working path would be unencrypted HTTP across the internet.
+        "server.insecure" = var.service_type == "LoadBalancer" ? false : var.server_insecure
       }
     }
 

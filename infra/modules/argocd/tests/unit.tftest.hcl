@@ -121,3 +121,34 @@ run "rejects_an_invalid_source_range" {
 
   expect_failures = [var.load_balancer_source_ranges]
 }
+
+# A TCP passthrough load balancer in front of a plain-HTTP server means the
+# handshake on 443 is reset and only unencrypted HTTP works. The combination
+# must not be expressible.
+run "load_balancer_forces_tls_termination_in_argocd" {
+  command = plan
+
+  variables {
+    service_type    = "LoadBalancer"
+    server_insecure = true
+  }
+
+  assert {
+    condition     = yamldecode(helm_release.this.values[0]).configs.params["server.insecure"] == false
+    error_message = "Behind a load balancer argocd-server must terminate TLS itself."
+  }
+}
+
+run "port_forward_setups_may_stay_insecure" {
+  command = plan
+
+  variables {
+    service_type    = "ClusterIP"
+    server_insecure = true
+  }
+
+  assert {
+    condition     = yamldecode(helm_release.this.values[0]).configs.params["server.insecure"] == true
+    error_message = "Without a load balancer the insecure setting should be honoured."
+  }
+}

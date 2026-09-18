@@ -16,7 +16,7 @@ variable "namespace" {
 }
 
 variable "server_insecure" {
-  description = "Serve the Argo CD API and UI over plain HTTP inside the cluster. Fine while the UI is reached through kubectl port-forward; set to false once an ingress terminates TLS."
+  description = "Serve the Argo CD API and UI over plain HTTP inside the cluster. Fine while the UI is only reached through kubectl port-forward. Ignored when service_type is LoadBalancer, because the NLB passes TCP through and argocd-server has to terminate TLS itself."
   type        = bool
   default     = true
 }

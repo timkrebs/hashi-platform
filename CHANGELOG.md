@@ -78,6 +78,9 @@ for the modules once they are tagged.
   predates the controller version the chart installs. Without them every
   `LoadBalancer` service hangs on `<pending>` and the cause is only visible in
   the controller log.
+- Argo CD forces `server.insecure` off when `service_type` is `LoadBalancer`.
+  The NLB passes TCP through, so a plain-HTTP backend resets every TLS
+  handshake on 443 and only unencrypted HTTP would work.
 - The Argo CD and Vault UIs are published through internet-facing network load
   balancers (`argocd_service_type`, `argocd_allowed_cidr_blocks`, and `ui.*` in
   the Vault values). The NLBs pass TCP through so both keep terminating TLS

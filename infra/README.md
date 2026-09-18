@@ -168,6 +168,11 @@ kubectl get svc argocd-server -n argocd -o jsonpath='{.status.loadBalancer.ingre
 kubectl get svc vault-ui      -n vault  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
 ```
 
+Argo CD terminates TLS itself once it is behind a load balancer — the module
+forces `server.insecure` off in that case, because the NLB passes TCP through
+and a plain-HTTP backend would reset every handshake on 443, leaving only
+unencrypted HTTP as a working path.
+
 Argo CD listens on 443, Vault's UI on 8200 (`https://<hostname>:8200`). The
 initial Argo CD password comes from
 `terraform output -raw argocd_initial_admin_password`.
