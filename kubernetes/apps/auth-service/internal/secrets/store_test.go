@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/crypto/bcrypt"
@@ -148,6 +149,30 @@ func TestLoadRejectsBadInput(t *testing.T) {
 		}
 		if _, err := Load(dir); err == nil {
 			t.Fatal("accepted a non-PEM signing key")
+		}
+	})
+
+	// Both encrypted PEM forms must be reported as such, not as a parse error.
+	// openssl produces the PKCS#8 form by default, which the deprecated
+	// x509.IsEncryptedPEMBlock would not have caught at all.
+	t.Run("passphrase-encrypted key", func(t *testing.T) {
+		for _, block := range []*pem.Block{
+			{Type: "RSA PRIVATE KEY", Headers: map[string]string{
+				"Proc-Type": "4,ENCRYPTED", "DEK-Info": "AES-256-CBC,0123",
+			}, Bytes: []byte("ciphertext")},
+			{Type: "ENCRYPTED PRIVATE KEY", Bytes: []byte("ciphertext")},
+		} {
+			dir := writeStore(t, 2048, map[string]string{"dev1": hash(t, "pw")}, false)
+			if err := os.WriteFile(filepath.Join(dir, signingKeyFile), pem.EncodeToMemory(block), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(dir)
+			if err == nil {
+				t.Fatalf("%s: accepted a passphrase-encrypted key", block.Type)
+			}
+			if !strings.Contains(err.Error(), "passphrase") {
+				t.Errorf("%s: error should name the cause, got %v", block.Type, err)
+			}
 		}
 	})
 

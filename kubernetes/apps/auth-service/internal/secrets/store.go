@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -117,8 +118,15 @@ func parsePrivateKey(raw []byte) (*rsa.PrivateKey, error) {
 	if block == nil {
 		return nil, fmt.Errorf("signing key is not PEM")
 	}
-	if x509.IsEncryptedPEMBlock(block) { //nolint:staticcheck // the check is the point
-		return nil, fmt.Errorf("signing key is passphrase-encrypted; this service has no passphrase")
+	// Passphrase-protected keys, reported clearly rather than as a parse error.
+	//
+	// Checked by hand instead of with x509.IsEncryptedPEMBlock: that function is
+	// deprecated, and it only recognises the legacy RFC 1423 form. The PKCS#8
+	// form uses a different block type entirely and would slip past it -- which
+	// matters here, because openssl produces the PKCS#8 form by default.
+	if strings.Contains(block.Headers["Proc-Type"], "ENCRYPTED") ||
+		block.Type == "ENCRYPTED PRIVATE KEY" {
+		return nil, fmt.Errorf("signing key is passphrase-encrypted; this service has no passphrase to open it")
 	}
 
 	// Accept both PKCS#1 ("RSA PRIVATE KEY") and PKCS#8 ("PRIVATE KEY").
