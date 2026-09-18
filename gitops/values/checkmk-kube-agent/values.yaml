@@ -3,8 +3,11 @@
 # The Checkmk host runs on an EC2 instance in the same VPC, so the cluster
 # collector is published on an *internal* load balancer. Unlike the Argo CD and
 # Vault interfaces there is no reason to expose this one: nothing outside the
-# VPC needs to read container metrics, and the endpoint is unauthenticated
-# unless tlsCommunication is turned on.
+# VPC needs to read container metrics.
+#
+# The endpoint itself authenticates through the Kubernetes TokenReview API — it
+# answers 401 without a service account token — so the internal scheme is a
+# second layer rather than the only one.
 
 clusterCollector:
   service:
