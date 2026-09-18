@@ -37,7 +37,30 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+      # Ohne das wuerde ignoreDifferences nur das Diff beeinflussen: ein Sync
+      # schriebe das Feld trotzdem. Erst RespectIgnoreDifferences laesst Argo
+      # die ignorierten Felder auch beim Anwenden in Ruhe.
+      - RespectIgnoreDifferences=true
   ignoreDifferences:
+    # Das Chart erzeugt das Grafana-Admin-Passwort bei JEDEM Render neu
+    # (randAlphaNum 40, weil grafana.adminPassword leer ist). Argo sah darum
+    # dauerhaft Drift und schrieb bei jedem Sync einen neuen Wert ins Secret --
+    # waehrend Grafana das Passwort nur beim allerersten Start in grafana.db
+    # schreibt. Die Datenbank liegt auf einer PVC und ueberlebt Neustarts, also
+    # lief das Secret immer weiter von der Realitaet weg und der Login schlug
+    # mit einem Passwort fehl, das korrekt ausgelesen war.
+    #
+    # Hier stehen zu lassen statt einen festen Wert in die Values zu schreiben:
+    # dieses Repo ist oeffentlich. Wer die Credentials sauber verwalten will,
+    # legt ein Secret ausserhalb von Git an und setzt in den Chart-Values
+    # grafana.admin.existingSecret -- dann kann dieser Block wieder weg.
+    - group: ""
+      kind: Secret
+      name: kube-prometheus-stack-grafana
+      namespace: observability
+      jsonPointers:
+        - /data/admin-password
+        - /data/admin-user
     # The operator writes caBundle into its own webhooks at runtime.
     - group: admissionregistration.k8s.io
       kind: MutatingWebhookConfiguration

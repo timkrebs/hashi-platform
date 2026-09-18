@@ -1,0 +1,31 @@
+# gitops/apps/queue-worker.yaml
+#
+# Der Quellcode und seine Manifeste liegen zusammen unter
+# kubernetes/apps/queue-worker/. Argo CD zeigt nur auf das deploy/-Verzeichnis
+# und rendert es mit Kustomize -- den Rest des Ordners ignoriert es.
+#
+# Sync-Wave 20: nach dem Observability-Stack (10) und den Dashboards (15).
+# Der ServiceMonitor braucht die Prometheus-Operator-CRD, sonst scheitert der
+# erste Sync an einer unbekannten Ressource.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: queue-worker
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/timkrebs/hashi-platform.git
+    targetRevision: main
+    path: kubernetes/apps/queue-worker/deploy
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: queue-worker
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

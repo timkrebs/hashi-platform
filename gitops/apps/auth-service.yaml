@@ -1,0 +1,31 @@
+# gitops/apps/auth-service.yaml
+#
+# Sync-Wave 20, wie queue-worker: der ServiceMonitor braucht die
+# Prometheus-Operator-CRD aus Wave 10.
+#
+# Wichtig: der Vault-Teil kommt NICHT von hier. Das kubernetes-Auth-Backend,
+# der Transit-Key, die Policy und die Rolle liegen in config/vault und werden
+# von der Terraform-Pipeline angewendet. Ohne die bleibt jeder Pod im
+# Init-Container haengen, weil der Vault-Agent sich nicht anmelden kann.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: auth-service
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/timkrebs/hashi-platform.git
+    targetRevision: main
+    path: kubernetes/apps/auth-service/deploy
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: auth-service
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
