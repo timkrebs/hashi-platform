@@ -43,13 +43,22 @@ test: ## Run the module unit tests (mocked providers, no AWS credentials)
 		terraform -chdir="$$dir" test || exit 1; \
 	done
 
+# Two Sentinel suites, two runtimes. infra/policies runs inside HCP Terraform
+# against tfplan/v2; config/vault/policies runs inside Vault against the
+# request global. They share no imports and no fixtures, so they are separate
+# invocations rather than one.
 policy-test: ## Format-check and test the Sentinel policies (needs the sentinel CLI)
 	@if ! command -v sentinel >/dev/null 2>&1; then \
 		echo "sentinel CLI not found; skipping policy tests (see infra/policies/README.md)"; \
 	else \
-		cd infra/policies && \
-		sentinel fmt -check -write=false ./*.sentinel ./testdata/*.sentinel && \
-		sentinel test -verbose; \
+		echo "==> sentinel infra/policies (HCP Terraform, tfplan/v2)" && \
+		( cd infra/policies && \
+		  sentinel fmt -check -write=false ./*.sentinel ./testdata/*.sentinel && \
+		  sentinel test -verbose ) && \
+		echo "==> sentinel config/vault/policies (Vault EGP, request global)" && \
+		( cd config/vault/policies && \
+		  sentinel fmt -check -write=false ./*.sentinel && \
+		  sentinel test ); \
 	fi
 
 check: fmt-check lint validate test policy-test ## Everything CI runs before a plan

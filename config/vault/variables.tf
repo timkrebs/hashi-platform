@@ -141,3 +141,25 @@ variable "kubernetes_host" {
     error_message = "kubernetes_host must be an https URL."
   }
 }
+
+variable "kv_naming_enforcement_level" {
+  description = "Enforcement level for the kv-naming EGP. Start at soft-mandatory: the violation is logged and the write still succeeds, which is the only way to find out what the rule would have broken before it breaks it. Switch to hard-mandatory once the audit log is quiet."
+  type        = string
+  default     = "soft-mandatory"
+
+  validation {
+    condition     = contains(["advisory", "soft-mandatory", "hard-mandatory"], var.kv_naming_enforcement_level)
+    error_message = "kv_naming_enforcement_level must be advisory, soft-mandatory or hard-mandatory."
+  }
+}
+
+variable "business_hours_enforcement_level" {
+  description = "Enforcement level for the business-hrs EGP. Starts at soft-mandatory: a time window that denies reads is the kind of rule that surprises someone at 18:05, and the audit log is the cheap way to find out who before it becomes a 403."
+  type        = string
+  default     = "soft-mandatory"
+
+  validation {
+    condition     = contains(["advisory", "soft-mandatory", "hard-mandatory"], var.business_hours_enforcement_level)
+    error_message = "business_hours_enforcement_level must be advisory, soft-mandatory or hard-mandatory."
+  }
+}

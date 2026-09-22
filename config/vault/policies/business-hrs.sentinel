@@ -1,0 +1,158 @@
+# business-hrs-europe-berlin
+#
+# Denies requests outside Monday-Friday 09:00-17:00 Europe/Berlin.
+#
+# Two things make this less trivial than it looks.
+#
+# Sentinel's time import is documented as UTC and offers no timezone
+# conversion, so "local time" has to be computed here. Writing
+# `time.now.hour >= 9` means 09:00 UTC, which is 11:00 in Berlin in summer and
+# 10:00 in winter -- a window that silently moves by an hour twice a year.
+#
+# And a Vault installation is mostly machines. The Secrets Operator, the Agent
+# Injector and CI do not keep office hours, so they are exempted explicitly
+# rather than being locked out every evening.
+
+import "time"
+
+# ----------------------------------------------------------------- settings
+#
+# Plain constants, not `param`. Vault's EGP endpoint has no way to pass
+# parameters -- vault_egp_policy takes only name, paths, enforcement_level and
+# policy -- so a param would be a knob that cannot be turned in production and
+# would only mislead whoever reads this next.
+
+business_start_hour = 9 # inclusive, local wall clock
+business_end_hour = 17  # exclusive, so 16:59 is inside and 17:00 is not
+
+# Auth mount types whose tokens belong to machines. Humans log in with
+# userpass, which is deliberately absent.
+exempt_auth_types = ["kubernetes", "approle", "aws", "jwt"]
+
+# Escape hatch for anything that cannot be identified by its auth mount --
+# the pipeline token, break-glass. Attach the policy, get exempted.
+exempt_policies = ["vault-automation"]
+
+# ---------------------------------------------------- Europe/Berlin offset
+#
+# CET is UTC+1, CEST is UTC+2. The EU switches on the last Sunday in March at
+# 01:00 UTC and back on the last Sunday in October at 01:00 UTC.
+
+now = time.now
+
+# The last Sunday of a month always falls between the 25th and the 31st.
+# Given a day and its weekday, the most recent Sunday is day - weekday. If
+# that already lands in the window it is the last Sunday; otherwise the last
+# Sunday is seven days further on.
+last_sunday = func(day, weekday) {
+	recent = day - weekday
+	if recent >= 25 {
+		return recent
+	}
+	return recent + 7
+}
+
+# Has the changeover in the current month already happened?
+past_changeover = func() {
+	# Before the 25th the last Sunday cannot have passed, and last_sunday()
+	# would be looking at the wrong week.
+	if now.day < 25 {
+		return false
+	}
+
+	s = last_sunday(now.day, now.weekday)
+	if now.day > s {
+		return true
+	}
+	return now.day is s and now.hour >= 1
+}
+
+is_cest = func() {
+	if now.month > 3 and now.month < 10 {
+		return true
+	}
+	if now.month < 3 or now.month > 10 {
+		return false
+	}
+	if now.month is 3 {
+		return past_changeover()
+	}
+
+	# October: summer time still applies until the changeover.
+	return not past_changeover()
+}
+
+utc_offset = func() {
+	if is_cest() {
+		return 2
+	}
+	return 1
+}
+
+local_hour = (now.hour + utc_offset()) % 24
+
+# Adding the offset can cross midnight, and then the local day is the next
+# one. Without this, 23:00 UTC on a Friday would still count as a Friday
+# although it is Saturday in Berlin. It does not change the outcome while the
+# window is 09:00-17:00, but it will the moment anyone widens it.
+day_rollover = func() {
+	if now.hour + utc_offset() >= 24 {
+		return 1
+	}
+	return 0
+}
+
+local_weekday = (now.weekday + day_rollover()) % 7
+
+# ------------------------------------------------------------- exemptions
+#
+# Both guarded with `else`: a token without an entity has no aliases, and
+# Sentinel would otherwise propagate undefined through the whole rule instead
+# of deciding.
+
+entity_aliases = identity.entity.aliases else []
+token_policies = token.policies else []
+
+is_service_identity = rule {
+	any entity_aliases as a {
+		(a.mount_type else "") in exempt_auth_types
+	} or
+	any token_policies as p {
+		p in exempt_policies
+	}
+}
+
+# ------------------------------------------------------------------- rules
+
+# 0 is Sunday and 6 is Saturday.
+within_workdays = rule {
+	local_weekday > 0 and local_weekday < 6
+}
+
+within_workhours = rule {
+	local_hour >= business_start_hour and local_hour < business_end_hour
+}
+
+# --------------------------------------------------------------- reporting
+
+if not is_service_identity and not (within_workdays and within_workhours) {
+	print("denied outside business hours: it is", local_hour, "o'clock on weekday",
+		local_weekday, "in Europe/Berlin (", now.hour, "UTC, offset +", utc_offset(),
+		"). The window is Monday to Friday", business_start_hour, "to",
+		business_end_hour, "local.")
+}
+
+# ---------------------------------------------------------------------- main
+
+# `rule when` short-circuits, so a service identity never reaches the time
+# check. main forwards to it rather than being the `rule when` itself: a rule
+# whose predicate is false is not evaluated, does not appear in the trace, and
+# `sentinel test` can only assert on rules that are in the trace -- the
+# exemption would be untestable.
+enforced = rule when not is_service_identity {
+	within_workdays and within_workhours
+}
+
+main = rule {
+	enforced
+}

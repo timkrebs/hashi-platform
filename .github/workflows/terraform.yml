@@ -151,10 +151,20 @@ jobs:
           echo "${SENTINEL_SHA256}  sentinel.zip" | sha256sum -c -
           unzip -q sentinel.zip -d "${RUNNER_TEMP}/sentinel"
           echo "${RUNNER_TEMP}/sentinel" >> "$GITHUB_PATH"
-      - name: sentinel
+      # Zwei Suiten, zwei Runtimes: infra/policies laeuft in HCP Terraform
+      # gegen tfplan/v2, config/vault/policies in Vault gegen das
+      # request-Global. Getrennte Schritte, damit der rote Kasten in der UI
+      # sagt, welche der beiden es war.
+      - name: sentinel (HCP Terraform policies)
         working-directory: infra/policies
         run: |
           sentinel fmt -check -write=false ./*.sentinel ./testdata/*.sentinel
+          sentinel test -verbose
+
+      - name: sentinel (Vault EGP policies)
+        working-directory: config/vault/policies
+        run: |
+          sentinel fmt -check -write=false ./*.sentinel
           sentinel test -verbose
 
   resolve:

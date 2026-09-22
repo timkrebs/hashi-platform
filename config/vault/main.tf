@@ -141,10 +141,10 @@ resource "random_password" "backend_api_key" {
 resource "vault_kv_secret_v2" "backend_api_key" {
   namespace = vault_namespace.backend.path_fq
   mount     = vault_mount.backend_kv.path
-  name      = "api-key"
+  name      = "backend/demo/api-key-secret"
 
   data_json = jsonencode({
-    api_key = random_password.backend_api_key.result
+    APP_API_KEY = random_password.backend_api_key.result
   })
 }
 
@@ -269,10 +269,10 @@ resource "random_password" "frontend_api_key" {
 resource "vault_kv_secret_v2" "frontend_api_key" {
   namespace = vault_namespace.frontend.path_fq
   mount     = vault_mount.frontend_kv.path
-  name      = "api-key"
+  name      = "frontend/demo/api-key-secret"
 
   data_json = jsonencode({
-    api_key = random_password.frontend_api_key.result
+    APP_API_KEY = random_password.frontend_api_key.result
   })
 }
 

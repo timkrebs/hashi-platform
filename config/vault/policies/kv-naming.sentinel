@@ -1,0 +1,133 @@
+# kv-naming-team-app-name-secret
+#
+# Enforces the KV v2 naming convention on the `kv` mount in the team
+# namespaces. The policy name is what Vault puts in the 403, so it states the
+# path shape a developer has to produce:
+#
+#   kv/data/<team>/<app>/<name>-secret
+#
+#   team  one of backend, frontend, platform
+#   app   lowercase a-z, 0-9 and hyphens, no leading or trailing hyphen
+#   name  same, and it must end in -secret
+#
+# Keys inside the secret are UPPER_SNAKE_CASE with an APP_ prefix, for example
+# APP_DB_PASSWORD.
+#
+# Only writes are judged. Reads, lists, deletes and everything under
+# kv/metadata/ pass untouched, so secrets that predate the convention stay
+# readable and deletable -- the policy constrains what is added, not what is
+# already there.
+
+import "strings"
+
+# ---------------------------------------------------------------- patterns
+
+# Both patterns are anchored. Without ^ and $, `matches` would accept any
+# string that merely contains a conforming substring, which turns the whole
+# policy into decoration.
+#
+# A segment is [a-z0-9]+(-[a-z0-9]+)* rather than the shorter [a-z0-9-]+: the
+# short form also accepts "-app", "app-" and "a--b". Writing it out is the only
+# way a hyphen cannot sit at an edge or double up.
+#
+# To allow another team, add it to the alternation below and add a passing
+# fixture in test/kv-naming/ -- see README.md.
+path_pattern = "^kv/data/(backend|frontend|platform)/[a-z0-9]+(-[a-z0-9]+)*/[a-z0-9]+(-[a-z0-9]+)*-secret$"
+
+# APP_ followed by at least one UPPER_SNAKE group. Rejects a bare "APP_",
+# a trailing underscore and a double underscore for the same reason as above.
+key_pattern = "^APP_[A-Z0-9]+(_[A-Z0-9]+)*$"
+
+# ------------------------------------------------------------------- scope
+
+# patch is listed with create and update: a KV v2 patch adds keys to an
+# existing secret, so it can introduce a non-conforming key just as a full
+# write can.
+write_operations = ["create", "update", "patch"]
+
+# The kv/data/ prefix is checked here rather than relying on path_pattern
+# alone. A write to kv/metadata/... must fall out of scope entirely; judged by
+# path_pattern it would simply not match and be denied, which is the opposite
+# of what "metadata operations are not affected" means.
+is_kv_write = rule {
+	request.operation in write_operations and
+	strings.has_prefix(request.path, "kv/data/")
+}
+
+# -------------------------------------------------------------------- data
+
+# request.data.data is undefined for operations that carry no body, and
+# Sentinel propagates undefined through the whole expression it appears in --
+# the policy would fail to evaluate instead of returning a decision. `else {}`
+# turns that into an empty map so the rules below stay decidable.
+secret_data = request.data.data else {}
+
+# `all` over an empty collection is true in Sentinel, so an empty secret would
+# satisfy keys_match_convention without a single key being checked. This rule
+# exists to close that hole, and it is separate so the failure says "empty"
+# rather than blaming the key pattern.
+data_present = rule {
+	length(secret_data) > 0
+}
+
+# ------------------------------------------------------------------- rules
+
+path_matches_convention = rule {
+	request.path matches path_pattern
+}
+
+keys_match_convention = rule {
+	all keys(secret_data) as k {
+		k matches key_pattern
+	}
+}
+
+# --------------------------------------------------------------- reporting
+
+# Vault returns the trace with the denial, so these lines are what a developer
+# actually reads. They name the offending value; without that the 403 says
+# only that some policy said no.
+if is_kv_write and not path_matches_convention {
+	print("path", request.path, "does not match kv/data/<team>/<app>/<name>-secret;",
+		"team must be one of backend, frontend, platform;",
+		"segments are lowercase a-z, 0-9 and hyphens with no leading, trailing or doubled hyphen")
+}
+
+if is_kv_write and not data_present {
+	print("write to", request.path, "carries no data; a secret with no keys is refused")
+}
+
+if is_kv_write and data_present and not keys_match_convention {
+	offending = filter keys(secret_data) as k {
+		not (k matches key_pattern)
+	}
+
+	print("keys", offending, "in", request.path,
+		"are not UPPER_SNAKE_CASE with an APP_ prefix, for example APP_DB_PASSWORD")
+}
+
+# ---------------------------------------------------------------------- main
+
+# `rule when` short-circuits: when is_kv_write is false the body is never
+# evaluated and enforced is true. That is what keeps reads, lists, deletes and
+# metadata out of scope.
+# The order matters for the tests, not for the outcome -- all three have to
+# hold either way. data_present sits last on purpose: with it in the middle,
+# `and` short-circuits before keys_match_convention is ever evaluated, that
+# rule never reaches the trace, and the empty-secret fixture cannot assert
+# that `all` over an empty map really does return true. Keeping it last makes
+# the vacuous pass observable, which is the whole point of that fixture.
+enforced = rule when is_kv_write {
+	path_matches_convention and keys_match_convention and data_present
+}
+
+# main only forwards `enforced`, and that indirection is deliberate. A rule
+# whose `when` predicate is false is never evaluated, so it does not appear in
+# the evaluation trace -- and `sentinel test` can only assert on rules that
+# are in the trace. With `main = rule when ...` the single most important
+# property of this policy, "a read is allowed no matter how the secret is
+# named", would be untestable. Referencing it from main forces main itself
+# into the trace while keeping the short-circuit.
+main = rule {
+	enforced
+}
