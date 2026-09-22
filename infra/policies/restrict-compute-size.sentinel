@@ -1,15 +1,22 @@
-# Compute for the platform stays at "medium" or smaller. Any instance type
+# Compute for the platform stays at "large" or smaller. Any instance type
 # whose size suffix is not in `allowed_sizes` is rejected, wherever it appears:
 # EKS managed node groups, EC2 instances, launch templates and configurations,
 # and Auto Scaling group instance overrides.
 #
 # Only resources being created or updated are checked. Instance types that are
 # unknown until apply fail closed, because the policy cannot prove their size.
+#
+# The ceiling was "medium" until the dev cluster ran out of room: a t3.medium
+# takes 17 pods (the VPC CNI hands out single IPs) and has 4 GiB, and three of
+# them were full at 51 pods with memory requests at 60-92 percent. t3.large
+# doubles both. Raising it again should be a decision, not a reflex -- the
+# pass-large fixture pins where the boundary sits so a change has to be
+# deliberate.
 
 import "tfplan/v2" as tfplan
 import "strings"
 
-param allowed_sizes default ["nano", "micro", "small", "medium"]
+param allowed_sizes default ["nano", "micro", "small", "medium", "large"]
 
 # Resource types with a single instance type attribute.
 instance_type_attrs = {

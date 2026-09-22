@@ -24,11 +24,22 @@ cluster_version = "1.35"
 
 use_hardened_node_ami = true
 
+# t3.large statt t3.medium. Zwei Grenzen zugleich: das VPC CNI gibt einer
+# t3.medium nur 17 Pods (3 ENIs x 5 + 2), einer t3.large 35 -- und der Speicher
+# verdoppelt sich von 4 auf 8 GiB, was noetiger war, weil die Requests schon
+# bei 60-92 Prozent lagen.
+#
+# max-pods muss nirgends gesetzt werden: bootstrap.sh rechnet es aus dem
+# Instanztyp aus. Dass auf den t3.medium exakt 17 stand, belegt, dass die
+# Berechnung greift.
+#
+# max_size 6 gibt der Managed Node Group Luft, Ersatz-Nodes hochzufahren,
+# bevor sie die alten leert. Bei 4 liefe der Austausch strikt nacheinander.
 node_groups = {
   default = {
-    instance_types = ["t3.medium"]
+    instance_types = ["t3.large"]
     min_size       = 3
-    max_size       = 4
+    max_size       = 6
     desired_size   = 3
   }
 }

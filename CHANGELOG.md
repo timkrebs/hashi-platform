@@ -218,6 +218,16 @@ for the modules once they are tagged.
 
 ### Changed
 
+- Dev nodes move from `t3.medium` to `t3.large`, and `restrict-compute-size`
+  allows `large`. The old ceiling bound twice over: the VPC CNI gives a
+  `t3.medium` 17 pods, so three nodes were 51 slots and full, and memory
+  requests sat at 60-92% of 4 GiB. `t3.large` doubles both, and `max-pods`
+  needs no configuration because the bootstrap derives it from the instance
+  type. `max_size` goes to 6 so replacements can start before the old nodes
+  drain. A new `pass-large` policy fixture pins the boundary; the existing
+  `fail-large-compute` mock carries `metal` and `xlarge` alongside `large`, so
+  it stayed green on its own and no longer proved where the limit was.
+
 - Dev cluster moves to Kubernetes 1.34 as the first of three steps towards 1.35,
   where the hardened EKS node image is published. EKS upgrades one minor version
   per apply, and no hardened image exists for 1.34, so the nodes stay on AL2023
@@ -249,6 +259,19 @@ for the modules once they are tagged.
   `infra/README.md` instead of reappearing as a red pull request every week.
 
 ### Removed
+
+- Fluent Bit and its CloudWatch log group (`enable_log_shipping = false`, and
+  the Argo CD Application). It ran as a DaemonSet, so it cost a pod slot on
+  every node — the most expensive kind of workload on a cluster whose limit is
+  17 pods per `t3.medium`, and exactly the slot a pinned DaemonSet pod needs.
+  No log is lost: Alloy still ships every container's stdout to Loki. What goes
+  is the copy outside the cluster.
+- `auth-service` scales to 0 until Vault can authenticate it. It waits for
+  `/vault/secrets/token`, but no Vault Agent sidecar is injected and Vault has
+  no `kubernetes` auth backend at all, so its readiness probe answered 503
+  roughly 48,000 times over two days. It held three pod slots without ever
+  becoming ready, and its PodDisruptionBudget sat at `disruptionsAllowed=0`,
+  which would have deadlocked any node drain.
 
 - The Checkmk agents left behind in the cluster. Removing an Argo CD
   Application does not remove what it deployed unless the Application carries

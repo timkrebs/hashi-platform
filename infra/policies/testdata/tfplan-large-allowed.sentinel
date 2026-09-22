@@ -1,0 +1,82 @@
+# The dev plan as it looks after the move to t3.large: a managed node group and
+# a launch template, both at "large", which the policy must now accept.
+#
+# This fixture exists because raising the ceiling silently weakened
+# fail-large-compute. That mock carries m5.large, t3.large, c6i.metal and
+# c5.xlarge at once, so it still fails on metal and xlarge and stays green --
+# but it no longer proves anything about where the boundary actually sits.
+# Without this file, nothing would catch the ceiling being raised again.
+terraform_version = "1.15.9"
+
+resource_changes = {
+	"module.eks.module.eks.module.eks_managed_node_group[\"default\"].aws_eks_node_group.this[0]": {
+		"address": "module.eks.module.eks.module.eks_managed_node_group[\"default\"].aws_eks_node_group.this[0]",
+		"change": {
+			"actions": ["update"],
+			"after": {
+				"instance_types": ["t3.large"],
+				"tags": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+				"tags_all": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+			},
+			"after_unknown": {
+				"instance_types": [false],
+				"tags":           {},
+				"tags_all":       {},
+			},
+			"before": {
+				"instance_types": ["t3.medium"],
+			},
+		},
+		"deposed":        "",
+		"index":          0,
+		"mode":           "managed",
+		"module_address": "module.eks.module.eks.module.eks_managed_node_group[\"default\"]",
+		"name":           "this",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_eks_node_group",
+	},
+	# The node group's launch template. Upstream leaves instance_type empty
+	# here and lets the node group carry it, which is why the policy has to
+	# skip "" rather than treat it as an unknown size.
+	"module.eks.module.eks.module.eks_managed_node_group[\"default\"].aws_launch_template.this[0]": {
+		"address": "module.eks.module.eks.module.eks_managed_node_group[\"default\"].aws_launch_template.this[0]",
+		"change": {
+			"actions": ["update"],
+			"after": {
+				"instance_type": "",
+				"tags": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+				"tags_all": {
+					"Environment": "Dev",
+					"ManagedBy":   "Terraform",
+					"Project":     "hashi-platform",
+				},
+			},
+			"after_unknown": {
+				"tags":     {},
+				"tags_all": {},
+			},
+			"before": {
+				"instance_type": "",
+			},
+		},
+		"deposed":        "",
+		"index":          0,
+		"mode":           "managed",
+		"module_address": "module.eks.module.eks.module.eks_managed_node_group[\"default\"]",
+		"name":           "this",
+		"provider_name":  "registry.terraform.io/hashicorp/aws",
+		"type":           "aws_launch_template",
+	},
+}

@@ -21,7 +21,15 @@ vault_init_secret_recovery_window_in_days = 0
 argocd_service_type        = "LoadBalancer"
 argocd_allowed_cidr_blocks = ["0.0.0.0/0"]
 
-# Container-Logs zusaetzlich nach CloudWatch als dauerhaftes Archiv.
-# Interaktive Suche laeuft ueber Loki im Cluster.
-enable_log_shipping   = true
+# Aus. Fluent Bit lief als DaemonSet und kostete damit einen Pod-Slot auf
+# JEDEM Node -- bei 17 Slots pro t3.medium der teuerste Posten, den man mit
+# einer Zeile loswird. Genau diese Slots brauchen die gepinnten DaemonSet-Pods,
+# die sonst nirgendwo hinkoennen.
+#
+# Verloren geht das dauerhafte CloudWatch-Archiv. Die interaktive Suche laeuft
+# ohnehin ueber Loki, und Alloy sammelt weiterhin jedes Container-Log ein --
+# es faellt also kein Log weg, nur die Kopie ausserhalb des Clusters.
+#
+# Wieder auf true, sobald der Cluster Luft hat.
+enable_log_shipping   = false
 log_retention_in_days = 14
