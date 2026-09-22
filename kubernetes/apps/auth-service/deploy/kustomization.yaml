@@ -32,4 +32,4 @@ generatorOptions:
 
 images:
   - name: ghcr.io/timkrebs/auth-service
-    newTag: sha-ec09d68728da
+    newTag: sha-f3abf6aaa6dc
