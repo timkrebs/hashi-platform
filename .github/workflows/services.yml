@@ -100,7 +100,7 @@ jobs:
         working-directory: kubernetes/apps/${{ matrix.service }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           # Each service's own go.mod decides the toolchain, so they can move
           # independently.
@@ -140,7 +140,7 @@ jobs:
         working-directory: kubernetes/apps/${{ matrix.service }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: kubernetes/apps/${{ matrix.service }}/go.mod
           cache-dependency-path: kubernetes/apps/${{ matrix.service }}/go.sum
@@ -164,7 +164,7 @@ jobs:
         working-directory: kubernetes/apps/${{ matrix.service }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: kubernetes/apps/${{ matrix.service }}/go.mod
           cache-dependency-path: kubernetes/apps/${{ matrix.service }}/go.sum
