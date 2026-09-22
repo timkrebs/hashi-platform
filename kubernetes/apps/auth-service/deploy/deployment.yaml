@@ -7,11 +7,20 @@ metadata:
     app.kubernetes.io/name: auth-service
     app.kubernetes.io/component: identity
 spec:
-  # Two, so a node drain or a rollout never takes the service to zero. The
-  # cluster has roughly five free pod slots (17 per t3.medium), so this is
-  # about the ceiling for now. The Vault Agent is a sidecar CONTAINER, not a
-  # second pod, so it costs no extra slot.
-  replicas: 2
+  # Vorlaeufig 0. Der Service kann derzeit nicht starten: er wartet auf
+  # /vault/secrets/token, der Vault Agent Injector setzt aber gar kein Sidecar,
+  # und in Vault existiert kein kubernetes-Auth-Backend -- `vault auth list`
+  # zeigt nur token/ und userpass/. Die Readiness-Probe antwortete darum ueber
+  # zwei Tage lang mit 503, rund 48.000 Mal.
+  #
+  # Zwei Gruende, ihn nicht einfach laufen zu lassen: er belegte drei Pod-Slots
+  # ohne je bereit zu werden, und seine PodDisruptionBudget stand bei
+  # currentHealthy=0 auf disruptionsAllowed=0 -- damit haette jedes
+  # Node-Draining blockiert.
+  #
+  # Zurueck auf 2, sobald config/vault/ das Kubernetes-Auth-Backend, die Rolle
+  # auth-service und die passende Policy im Namespace hp-dev-backend hat.
+  replicas: 0
   revisionHistoryLimit: 3
   strategy:
     type: RollingUpdate
