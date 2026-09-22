@@ -1,5 +1,5 @@
-# Mensch ueber userpass: userpass steht bewusst NICHT in exempt_auth_types.
-# 2026-07-12 ist ein Sonntag (weekday 0), 03:00 UTC.
+# Mensch ueber userpass: auth/userpass/ steht bewusst NICHT in
+# exempt_auth_paths.
 mock "time" {
   data = {
     now = {
@@ -12,8 +12,7 @@ mock "time" {
   }
 }
 
-global "identity" { value = { entity = { aliases = [ { mount_type = "userpass" } ] } } }
-global "token"    { value = {} }
+global "token"    { value = { path = "auth/userpass/login/timkrebs", policies = ["dev"] } }
 
 test {
   rules = {

@@ -1,5 +1,5 @@
-# Ausnahme ueber die Policy vault-automation -- der Weg fuer die Pipeline.
-# 2026-07-12 ist ein Sonntag (weekday 0), 03:00 UTC.
+# Ausnahme ueber die Policy vault-automation -- der Weg fuer Break-glass
+# und fuer alles, was sich nicht am Auth-Mount erkennen laesst.
 mock "time" {
   data = {
     now = {
@@ -12,8 +12,7 @@ mock "time" {
   }
 }
 
-global "identity" { value = {} }
-global "token"    { value = { policies = ["default", "vault-automation"] } }
+global "token"    { value = { path = "auth/token/create", policies = ["default", "vault-automation"] } }
 
 test {
   rules = {

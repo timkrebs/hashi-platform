@@ -12,8 +12,7 @@ mock "time" {
   }
 }
 
-global "identity" { value = {} }
-global "token"    { value = {} }
+global "token"    { value = { path = "auth/userpass/login/timkrebs", policies = ["dev", "default"] } }
 
 test {
   rules = {

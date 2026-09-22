@@ -13,6 +13,7 @@
 # Injector and CI do not keep office hours, so they are exempted explicitly
 # rather than being locked out every evening.
 
+import "strings"
 import "time"
 
 # ----------------------------------------------------------------- settings
@@ -24,10 +25,6 @@ import "time"
 
 business_start_hour = 9 # inclusive, local wall clock
 business_end_hour = 17  # exclusive, so 16:59 is inside and 17:00 is not
-
-# Auth mount types whose tokens belong to machines. Humans log in with
-# userpass, which is deliberately absent.
-exempt_auth_types = ["kubernetes", "approle", "aws", "jwt"]
 
 # Escape hatch for anything that cannot be identified by its auth mount --
 # the pipeline token, break-glass. Attach the policy, get exempted.
@@ -106,16 +103,36 @@ local_weekday = (now.weekday + day_rollover()) % 7
 
 # ------------------------------------------------------------- exemptions
 #
-# Both guarded with `else`: a token without an entity has no aliases, and
-# Sentinel would otherwise propagate undefined through the whole rule instead
-# of deciding.
+# Identified through `token`, never through `identity`.
+#
+# `identity` is a conditionally present namespace. A token with no entity --
+# anything from `vault token create`, for instance -- does not get one, and
+# Sentinel then aborts with "unknown identifier accessed: identity" instead of
+# returning a decision. `else` does not help: it catches an undefined VALUE,
+# not an absent IDENTIFIER. Verified against the CLI -- both
+# `identity.entity.aliases else []` and `identity else null` fail identically.
+#
+# `token` is conditionally present too; the properties documentation notes it
+# is absent while logging in. This policy must therefore only be attached to
+# authenticated paths. kv/data/* is one, an auth/*/login path would not be.
+#
+# token.path is "the request path that resulted in creation of this token",
+# so it names the auth mount the token came from: auth/kubernetes/login for a
+# pod, auth/userpass/login/<user> for a human.
 
-entity_aliases = identity.entity.aliases else []
+exempt_auth_paths = [
+	"auth/kubernetes/",
+	"auth/approle/",
+	"auth/aws/",
+	"auth/jwt/",
+]
+
+token_path = token.path else ""
 token_policies = token.policies else []
 
 is_service_identity = rule {
-	any entity_aliases as a {
-		(a.mount_type else "") in exempt_auth_types
+	any exempt_auth_paths as prefix {
+		strings.has_prefix(token_path, prefix)
 	} or
 	any token_policies as p {
 		p in exempt_policies

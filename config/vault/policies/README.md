@@ -12,6 +12,23 @@ Sentinel runtime from `infra/policies/`: those run inside HCP Terraform against
 
 Both ship at `soft-mandatory`.
 
+## Root tokens are not governed
+
+**Neither policy applies to a root token.** HashiCorp states it plainly: *"Like
+with ACLs, root tokens are not subject to Sentinel policy checks."* Writing a
+non-conforming secret with the root token succeeds, at any enforcement level,
+and nothing appears in the trace because the policy is never evaluated.
+
+This is not a gap to work around — root token generation deliberately cannot be
+governed by an EGP, because it is the way back in after a misconfigured one
+locks everyone out.
+
+It does mean two things in practice. Testing enforcement requires a non-root
+token: `vault token create -policy=dev -ttl=2m` and then writing with that.
+And the pipeline token (`display_name` `token-terraform`) currently carries the
+`root` policy, so `config/vault` applies are exempt — convenient, but it also
+means CI cannot prove the policies work.
+
 ---
 
 # kv-naming-team-app-name-secret
@@ -176,19 +193,36 @@ Adding the offset can cross midnight, so the weekday is corrected too. It makes
 no difference while the window is 09:00-17:00 — it will the moment anyone
 widens it.
 
-## Why machines are exempt
+## Why machines are exempt, and why through `token`
 
 A Vault installation is mostly machines, and they do not keep office hours. Two
 exemptions, both in the policy:
 
-- **auth mount type** in `kubernetes`, `approle`, `aws`, `jwt`. `userpass` is
-  deliberately absent — that is how humans log in here.
+- **`token.path`** starting with `auth/kubernetes/`, `auth/approle/`,
+  `auth/aws/` or `auth/jwt/`. It is "the request path that resulted in creation
+  of this token", so it names the auth mount the token came from.
+  `auth/userpass/` is deliberately absent — that is how humans log in here.
 - **the policy `vault-automation`**, created by `egp.tf` as a marker that grants
-  nothing. Attach it to the pipeline token or to a break-glass token and the
-  time check is skipped.
+  nothing. Attach it to a break-glass token and the time check is skipped.
 
-Without these, the Secrets Operator and the Agent Injector would fail every
-evening.
+The first version of this used `identity.entity.aliases`, and it broke in
+production: `identity` is a **conditionally present namespace**, a token with no
+entity does not get one, and Sentinel then aborts with
+
+```
+unknown identifier accessed: identity
+```
+
+instead of returning a decision. `else` does not help — it catches an undefined
+*value*, not an absent *identifier*; `identity.entity.aliases else []` and
+`identity else null` fail identically. The unit tests missed it because the
+fixtures mocked `global "identity" { value = {} }`, which makes the identifier
+exist.
+
+`token` is conditionally present as well — the properties documentation notes it
+is absent while logging in — so **this policy must only ever be attached to
+authenticated paths**. `kv/data/*` is one; an `auth/*/login` path would break it
+the same way.
 
 ## Scope
 

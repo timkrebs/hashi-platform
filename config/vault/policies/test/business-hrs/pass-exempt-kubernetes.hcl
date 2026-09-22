@@ -1,5 +1,6 @@
-# Service-Identitaet ueber das kubernetes-Auth-Mount: ausgenommen, obwohl Sonntagnacht.
-# 2026-07-12 ist ein Sonntag (weekday 0), 03:00 UTC.
+# Service-Identitaet: der Token stammt aus dem kubernetes-Auth-Mount.
+# token.path ist der Pfad, der den Token erzeugt hat -- so laesst sich das
+# Auth-Verfahren erkennen, ohne identity anzufassen.
 mock "time" {
   data = {
     now = {
@@ -12,8 +13,7 @@ mock "time" {
   }
 }
 
-global "identity" { value = { entity = { aliases = [ { mount_type = "kubernetes" } ] } } }
-global "token"    { value = {} }
+global "token"    { value = { path = "auth/kubernetes/login", policies = ["default"] } }
 
 test {
   rules = {
