@@ -140,18 +140,6 @@ module "fluent_bit" {
   tags = local.common_tags
 }
 
-# Adopts a namespace Argo CD created before this layer first ran. `terraform
-# import` is not available with remote execution, so the adoption is declared
-# here and happens on the next apply.
-#
-# Safe to leave in place: an import block whose target is already managed is a
-# no-op, so this neither fails nor repeats. Remove it whenever the repository
-# gets tidied.
-import {
-  to = kubernetes_namespace_v1.logging[0]
-  id = var.logging_namespace
-}
-
 # Same reason as the Vault service account: the IRSA annotation carries the AWS
 # account ID, which must not land in this public repository, so the chart is
 # told to reuse what Terraform created.

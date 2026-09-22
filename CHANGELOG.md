@@ -196,9 +196,6 @@ for the modules once they are tagged.
   with `unauthenticated_metrics_access` enabled on it. It stays disabled on
   8200, which the load balancer publishes to the internet. Prometheus scrapes
   the pod IPs directly, because the chart declares no container port for 8202.
-- An `import` block adopts the `logging` namespace Argo CD had already created.
-  `terraform import` is unavailable with remote execution, and an import block
-  whose target is already managed is a no-op, so it is safe to leave in place.
 - The Fluent Bit Application does not create its namespace: the platform layer
   owns it, because the service account in it needs an IRSA annotation carrying
   the AWS account ID. With both creating it, whichever ran second failed.
@@ -259,6 +256,14 @@ for the modules once they are tagged.
   `infra/README.md` instead of reappearing as a red pull request every week.
 
 ### Removed
+
+- The `import` block that adopted the `logging` namespace. With
+  `enable_log_shipping = false` the namespace resource has `count = 0`, and an
+  import block pointing at `[0]` then has no configuration to attach to:
+  "Configuration for import target does not exist", raised during plan, which
+  failed the apply. `terraform validate` does not catch this — the count
+  depends on a variable and validate does not read tfvars — so neither
+  `make check` nor the CI validate job would have found it.
 
 - Fluent Bit and its CloudWatch log group (`enable_log_shipping = false`, and
   the Argo CD Application). It ran as a DaemonSet, so it cost a pod slot on
