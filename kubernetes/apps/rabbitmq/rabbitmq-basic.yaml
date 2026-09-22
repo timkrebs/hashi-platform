@@ -10,7 +10,25 @@ metadata:
   name: rabbitmq-dev
   namespace: rabbitmq
 spec:
-  replicas: 3
+  # 1 statt 3. Drei Replicas waren mit 3x1 GiB der groesste Speicherposten im
+  # Cluster -- 32 Prozent aller Requests -- und haben drei der 17 Pod-Slots pro
+  # Node belegt, die t3.medium ueber das VPC CNI hergibt.
+  #
+  # Damit faellt die Ausfallsicherheit weg: keine Quorum Queues, und ein
+  # Node-Ausfall nimmt den Broker mit. Fuer eine Sandbox ist das der richtige
+  # Tausch, fuer alles andere nicht.
+  #
+  # ACHTUNG: der Operator setzt das an einem BESTEHENDEN Cluster nicht um. Er
+  # lehnt Scale-down ab ("Cluster Scale down not supported", UnsupportedOperation)
+  # und laesst das StatefulSet auf dem alten Wert stehen -- das Feld hier
+  # aendert sich dann, ohne dass etwas passiert. Der Validating Webhook nimmt
+  # den Patch trotzdem an, ein `kubectl apply --dry-run=server` beweist also
+  # nichts.
+  #
+  # Wirksam wird der Wert nur bei einem NEU angelegten Cluster. Fuer einen
+  # bestehenden heisst das loeschen und neu anlegen, was Queues, Nachrichten
+  # und die generierten Zugangsdaten mitnimmt.
+  replicas: 1
 
   # Keine Credentials hier. Der Operator erzeugt das Secret
   # rabbitmq-dev-default-user mit einem Zufallspasswort; das ist die einzige
