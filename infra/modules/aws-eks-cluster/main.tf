@@ -65,7 +65,7 @@ locals {
 
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "20.8.5"
+  version = "20.37.2"
 
   cluster_name    = var.cluster_name
   cluster_version = var.cluster_version
@@ -104,7 +104,7 @@ data "aws_iam_policy" "ebs_csi" {
 
 module "ebs_csi_irsa" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc"
-  version = "5.39.0"
+  version = "5.60.0"
 
   create_role                   = true
   role_name                     = "${var.cluster_name}-ebs-csi"
